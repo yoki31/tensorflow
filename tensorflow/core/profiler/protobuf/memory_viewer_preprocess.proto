@@ -56,6 +56,9 @@ message PreprocessResult {
   // and dimensionality) at each HLO program point (the HLO sequential order).
   repeated double unpadded_heap_sizes = 2;
 
+  // The HloInstruction that was being processed at this HLO program point.
+  repeated string hlo_instruction_names = 20;
+
   // Heap objects at the peak memory usage point ordered by HLO program "birth"
   // time.
   repeated HeapObject max_heap = 3;
@@ -94,5 +97,12 @@ message PreprocessResult {
 
   double maybe_live_out_mib = 15;
 
+  // total size of indefinite/global and temporary buffer allocations.
+  double total_buffer_allocation_mib = 18;
+  // total size of indefinite/global buffer allocations.
+  double indefinite_buffer_allocation_mib = 19;
+
   repeated BufferAllocation indefinite_lifetimes = 16;
+
+  string allocation_timeline = 17;
 }

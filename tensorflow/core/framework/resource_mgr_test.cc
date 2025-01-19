@@ -16,10 +16,12 @@ limitations under the License.
 #include "tensorflow/core/framework/resource_mgr.h"
 
 #include <memory>
+#include <vector>
 
 #include "tensorflow/core/framework/device_attributes.pb.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/node_def_util.h"
+#include "tensorflow/core/framework/resource_handle.pb.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/lib/core/refcount.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
@@ -71,25 +73,25 @@ string LookupOrCreate(ResourceMgr* rm, const string& container,
   T* r;
   TF_CHECK_OK(rm->LookupOrCreate<T>(container, name, &r, [&label](T** ret) {
     *ret = new T(label);
-    return Status::OK();
+    return absl::OkStatus();
   }));
   const string ret = r->DebugString();
   r->Unref();
   return ret;
 }
 
-static void HasError(const Status& s, const error::Code code,
+static void HasError(const absl::Status& s, const error::Code code,
                      const string& substr) {
   EXPECT_EQ(s.code(), code);
-  EXPECT_TRUE(absl::StrContains(s.error_message(), substr))
+  EXPECT_TRUE(absl::StrContains(s.message(), substr))
       << s << ", expected substring " << substr;
 }
 
 template <typename T>
-Status FindErr(const ResourceMgr& rm, const string& container,
-               const string& name) {
+absl::Status FindErr(const ResourceMgr& rm, const string& container,
+                     const string& name) {
   T* r;
-  Status s = rm.Lookup(container, name, &r);
+  absl::Status s = rm.Lookup(container, name, &r);
   CHECK(!s.ok());
   return s;
 }
@@ -238,7 +240,7 @@ TEST(ResourceMgrTest, CreateOrLookupRaceCondition) {
               Env::Default()->SleepForMicroseconds(1 * 1000 * 1000);
               atomic_int += 1;
               *ret = new Resource("label");
-              return Status::OK();
+              return absl::OkStatus();
             }));
         r->Unref();
       });
@@ -248,9 +250,9 @@ TEST(ResourceMgrTest, CreateOrLookupRaceCondition) {
   EXPECT_EQ(1, atomic_int);
 }
 
-Status ComputePolicy(const string& attr_container,
-                     const string& attr_shared_name,
-                     bool use_node_name_as_default, string* result) {
+absl::Status ComputePolicy(const string& attr_container,
+                           const string& attr_shared_name,
+                           bool use_node_name_as_default, string* result) {
   ContainerInfo cinfo;
   ResourceMgr rmgr;
   NodeDef ndef;
@@ -263,7 +265,7 @@ Status ComputePolicy(const string& attr_container,
   }
   TF_RETURN_IF_ERROR(cinfo.Init(&rmgr, ndef, use_node_name_as_default));
   *result = cinfo.DebugString();
-  return Status::OK();
+  return absl::OkStatus();
 }
 
 string Policy(const string& attr_container, const string& attr_shared_name,
@@ -290,8 +292,9 @@ TEST(ContainerInfo, Basic) {
   EXPECT_EQ(Policy(".cat", "bar", true), "[.cat,bar,public]");
 }
 
-Status WrongPolicy(const string& attr_container, const string& attr_shared_name,
-                   bool use_node_name_as_default) {
+absl::Status WrongPolicy(const string& attr_container,
+                         const string& attr_shared_name,
+                         bool use_node_name_as_default) {
   string dbg;
   auto s = ComputePolicy(attr_container, attr_shared_name,
                          use_node_name_as_default, &dbg);
@@ -369,6 +372,63 @@ TEST(ResourceHandleTest, CRUD) {
     core::RefCountPtr<StubResource> unused;
     EXPECT_FALSE(LookupResource(&ctx, p, &unused).ok());
   }
+}
+
+TEST(ResourceHandleTest, ResourceFromValidIntInput) {
+  ResourceMgr resource_mgr("");
+  OpKernelContext::Params params;
+  params.resource_manager = &resource_mgr;
+  StubDevice device("device_name");
+  params.device = &device;
+  OpKernelContext ctx(&params, 1);
+
+  ResourceHandleProto proto;
+  proto.set_device("cpu:0");
+  proto.set_container("test_container");
+  proto.set_name("test_var");
+  auto handle = std::make_unique<ResourceHandle>(proto);
+  auto expected_summary =
+      "ResourceHandle(name=\"test_var\", device=\"cpu:0\", "
+      "container=\"test_container\", type=\"\", dtype and shapes : \"[  ]\")";
+  EXPECT_EQ(handle->SummarizeValue(), expected_summary);
+
+  Tensor arg0(DT_RESOURCE, TensorShape({2}));
+  arg0.flat<ResourceHandle>()(0) = *handle;
+  std::vector<tensorflow::TensorValue> inputs{TensorValue(new Tensor(arg0))};
+  params.inputs = inputs;
+
+  ResourceHandle get_int_handle;
+  TF_ASSERT_OK(HandleFromInput(&ctx, 0, &get_int_handle));
+  EXPECT_EQ(get_int_handle.SummarizeValue(), expected_summary);
+  delete inputs.at(0).tensor;
+}
+
+TEST(ResourceHandleTest, ResourceFromInvalidIntInput) {
+  ResourceMgr resource_mgr("");
+  OpKernelContext::Params params;
+  params.resource_manager = &resource_mgr;
+  StubDevice device("device_name");
+  params.device = &device;
+  OpKernelContext ctx(&params, 0);
+
+  ResourceHandle get_int_handle;
+  EXPECT_FALSE(HandleFromInput(&ctx, 0, &get_int_handle).ok());
+}
+
+TEST(ResourceHandleTest, ResourceFromIntInputWithoutResource) {
+  ResourceMgr resource_mgr("");
+  OpKernelContext::Params params;
+  params.resource_manager = &resource_mgr;
+  StubDevice device("device_name");
+  params.device = &device;
+  OpKernelContext ctx(&params, 1);
+
+  std::vector<tensorflow::TensorValue> inputs{TensorValue(new Tensor())};
+  params.inputs = inputs;
+
+  ResourceHandle get_int_handle;
+  EXPECT_FALSE(HandleFromInput(&ctx, 0, &get_int_handle).ok());
+  delete inputs.at(0).tensor;
 }
 
 TEST(ResourceHandleTest, LookupDeleteGenericResource) {

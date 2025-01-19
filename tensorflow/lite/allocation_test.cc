@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#include "tensorflow/lite/allocation.h"
+#include "tensorflow/compiler/mlir/lite/allocation.h"
 
 #if defined(__linux__)
 #include <fcntl.h>
@@ -86,7 +86,8 @@ TEST(MMAPAllocation, TestInvalidSizeAndOffset) {
                                            &error_reporter);
   EXPECT_FALSE(allocation_invalid_length.valid());
 
-  MMAPAllocation allocation_excessive_length(fd, /*offset=*/0, /*length=*/0,
+  MMAPAllocation allocation_excessive_length(fd, /*offset=*/0,
+                                             /*length=*/file_size + 1,
                                              &error_reporter);
   EXPECT_FALSE(allocation_excessive_length.valid());
 

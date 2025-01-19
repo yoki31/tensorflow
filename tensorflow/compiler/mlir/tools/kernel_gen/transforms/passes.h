@@ -17,12 +17,27 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_MLIR_TOOLS_KERNEL_GEN_TRANSFORMS_PASSES_H_
 
 #include <memory>
+#include <string>
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/GPU/GPUDialect.h"  // from @llvm-project
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"  // from @llvm-project
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+
+#define GEN_PASS_DECL_TFKERNELTOLLVMPASS
+#define GEN_PASS_DECL_EMBEDTFFRAMEWORKPASS
+#define GEN_PASS_DECL_REWRITETFFRAMEWORKASSERT
+#define GEN_PASS_DECL_FUNCTOJITINVOCATIONPASS
+#define GEN_PASS_DECL_BUFFERREUSEPASS
+#define GEN_PASS_DECL_SHAPETODESCRIPTORSPASS
+#define GEN_PASS_DECL_KERNELGENFINALBUFFERIZEPASS
+#define GEN_PASS_DECL_GPUKERNELTOBLOBPASS
+#define GEN_PASS_DECL_PARALLELLOOPSTOSEQUENTIAL
+#define GEN_PASS_DECL_PROPAGATETFABIKNOWLEDGETOKERNELS
+#define GEN_PASS_DECL_PROPAGATESHAPEKNOWLEDGETOKERNELS
+#define GEN_PASS_DECL_FUSEINNERPARALLELLOOPSPASS
+#define GEN_PASS_DECL_COPYCLEANUPPASS
 
 namespace mlir {
 namespace kernel_gen {
@@ -47,12 +62,12 @@ namespace transforms {
 // Pass to find and annotate candidates for buffer reuse.
 std::unique_ptr<OperationPass<func::FuncOp>> CreateBufferReusePass();
 
-// Pass to rewrite all TF operations to JIT invocations through the TF
+// Pass to rewrite all functions to JIT invocations through the TF
 // framework.
-std::unique_ptr<OperationPass<func::FuncOp>> CreateTFToJITInvocationPass(
+std::unique_ptr<OperationPass<func::FuncOp>> CreateFuncToJITInvocationPass(
     llvm::ArrayRef<int64_t> tile_sizes = {},
-    llvm::ArrayRef<int64_t> unroll_factors = {}, int64_t max_supported_rank = 5,
-    bool enable_ftz = false, bool index_64bit = false, bool cpu_codegen = false,
+    llvm::ArrayRef<int64_t> unroll_factors = {}, bool enable_ftz = false,
+    bool index_64bit = false, bool cpu_codegen = false,
     bool jit_i64_indexed_for_large_tensors = false);
 
 // Pass for applying LLVM legalization patterns.
@@ -62,21 +77,6 @@ std::unique_ptr<OperationPass<ModuleOp>> CreateTFKernelToLLVMPass(
 // Pass to tranform shape computations in shape dialect to standard and scf
 // using memref descriptors.
 std::unique_ptr<OperationPass<ModuleOp>> CreateShapeToDescriptorsPass();
-
-// Pass to tranform compute computations (hlo and linalg) on values to their
-// corresponding counterparts on buffers. Also bufferizes function signatures.
-std::unique_ptr<OperationPass<ModuleOp>> CreateComputeOpAndFuncBufferizePass();
-
-// Pass to bufferize `linalg.tiled_loop` including the operations contained in
-// its body.
-std::unique_ptr<OperationPass<func::FuncOp>> CreateTiledLoopBufferizePass();
-
-// Pass to tranform computations on values to their corresponding parts on
-// buffers.
-std::unique_ptr<OperationPass<ModuleOp>> CreateFinalBufferizePass();
-
-// Pass to replace unsigned types with signless integers.
-std::unique_ptr<OperationPass<ModuleOp>> CreateConvertToSignlessPass();
 
 // Pass to convert scf::ParallelOp to scf::ForOp.
 std::unique_ptr<OperationPass<func::FuncOp>> CreateParallelLoopsToSequential();
@@ -95,9 +95,6 @@ CreatePropagateTfAbiKnowledgeToKernels();
 std::unique_ptr<OperationPass<func::FuncOp>>
 CreatePropagateShapeKnowledgeToKernels();
 
-// Pass to print content of memrefs.
-std::unique_ptr<OperationPass<ModuleOp>> CreateEmbedMemRefPrintsPass();
-
 /// Greedily maps loops to GPU hardware dimensions.
 std::unique_ptr<mlir::OperationPass<func::FuncOp>> CreateMapParallelLoopsPass();
 
@@ -107,25 +104,10 @@ std::unique_ptr<mlir::OperationPass<func::FuncOp>> CreateMapParallelLoopsPass();
 std::unique_ptr<mlir::OperationPass<func::FuncOp>>
 CreateFuseInnerParallelLoopsPass();
 
-/// Pass that transforms gpu modules in standard dialect to NNVM.
-std::unique_ptr<OperationPass<mlir::gpu::GPUModuleOp>>
-CreateGpuKernelToNvvmPass();
-
-/// Pass that transforms gpu modules in standard dialect to ROCDL.
-std::unique_ptr<OperationPass<mlir::gpu::GPUModuleOp>>
-CreateGpuKernelToRocdlPass();
-
-// Pass to create vectorized code for CPU.
-std::unique_ptr<OperationPass<func::FuncOp>> CreateVectorizationPass();
-
-// Pass to remove unneeded code generated in VectorizationPass.
-std::unique_ptr<OperationPass<func::FuncOp>> CreateVectorizationCleanupPass();
-
 // Pass to remove copies which are consumed by a GenericOp.
 std::unique_ptr<OperationPass<func::FuncOp>> CreateCopyCleanupPass();
 
-std::unique_ptr<OperationPass<ModuleOp>> CreateFinalBufferizePass(
-    uint64_t alignment);
+std::unique_ptr<OperationPass<ModuleOp>> CreateKernelgenFinalBufferizePass();
 
 }  // namespace transforms
 

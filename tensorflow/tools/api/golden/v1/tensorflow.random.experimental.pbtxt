@@ -2,7 +2,7 @@ path: "tensorflow.random.experimental"
 tf_module {
   member {
     name: "Algorithm"
-    mtype: "<class \'enum.EnumMeta\'>"
+    mtype: "<class \'enum.EnumType\'>"
   }
   member {
     name: "Generator"
@@ -27,6 +27,10 @@ tf_module {
   member_method {
     name: "stateless_fold_in"
     argspec: "args=[\'seed\', \'data\', \'alg\'], varargs=None, keywords=None, defaults=[\'auto_select\'], "
+  }
+  member_method {
+    name: "stateless_shuffle"
+    argspec: "args=[\'value\', \'seed\', \'alg\', \'name\'], varargs=None, keywords=None, defaults=[\'auto_select\', \'None\'], "
   }
   member_method {
     name: "stateless_split"

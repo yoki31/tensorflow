@@ -21,9 +21,9 @@ limitations under the License.
 
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "tensorflow/core/framework/graph_debug_info.pb.h"
 #include "tensorflow/core/graph/graph.h"
 #include "tensorflow/core/platform/status.h"
-#include "tensorflow/core/protobuf/graph_debug_info.pb.h"
 
 namespace mlir {
 namespace tfg {
@@ -34,7 +34,7 @@ namespace tfg {
 //
 // This is meant for simple interop where there is a Graph* currently. Passes
 // created here are constrained to run on Module ops.
-tensorflow::Status RunTransformOnGraph(
+absl::Status RunTransformOnGraph(
     tensorflow::Graph* graph,
     const std::initializer_list<
         llvm::function_ref<std::unique_ptr<mlir::Pass>()>>& passes,

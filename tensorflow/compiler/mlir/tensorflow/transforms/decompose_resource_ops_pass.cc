@@ -23,7 +23,6 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_device.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/decompose_resource_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
-#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_device_passes_detail.h"
 
 namespace mlir {
 namespace TFDevice {
@@ -36,7 +35,7 @@ constexpr char kBadDecompositionMessage[] =
 // converge as only a few patterns create new resource ops that can be further
 // decomposed. The rest of the iterations are enough to clean up any dead ops
 // created by decomposition.
-constexpr int kMaxIterations = 10;
+constexpr int kMaxIterations = 20;
 
 // Populates `reachable_functions` with all functions that can be reached from
 // device cluster ops.
@@ -94,10 +93,13 @@ LogicalResult ApplyPatternsLocallyUntilConverged(
     changed = false;
     auto walk_result =
         op_with_regions->walk([&patterns, &changed](Operation* operation) {
-          bool op_changed;
-          if (failed(applyOpPatternsAndFold(operation, patterns, &op_changed)))
+          GreedyRewriteConfig config;
+          config.strictMode = mlir::GreedyRewriteStrictness::ExistingOps;
+          bool op_erased;
+          if (failed(applyOpPatternsAndFold(operation, patterns, config,
+                                            &op_erased)))
             return WalkResult::interrupt();
-          changed |= op_changed;
+          changed |= op_erased;
           return WalkResult::advance();
         });
     if (walk_result.wasInterrupted()) return failure();
@@ -118,7 +120,7 @@ LogicalResult ApplyPatternsInClusterAndReachableFunctions(
   // Apply patterns to reachable functions.
   for (Operation* op : reachable_functions) {
     assert(isa<func::FuncOp>(op));
-    if (failed(applyPatternsAndFoldGreedily(op, patterns))) {
+    if (failed(applyPatternsGreedily(op, patterns))) {
       return op->emitError() << kBadDecompositionMessage;
     }
   }
@@ -135,7 +137,7 @@ LogicalResult ApplyPatternsInClusterAndReachableFunctions(
 
     auto walk_result = func.walk([&](tf_device::ClusterOp cluster) {
       // Cluster ops are not isolated from above so we cannot use
-      // `applyPatternsAndFoldGreedily` utility. Instead we apply patterns
+      // `applyPatternsGreedily` utility. Instead we apply patterns
       // locally on each op within the cluster until convergence.
       if (failed(ApplyPatternsLocallyUntilConverged(cluster, patterns,
                                                     max_iterations))) {
@@ -150,23 +152,28 @@ LogicalResult ApplyPatternsInClusterAndReachableFunctions(
   return success();
 }
 
+#define GEN_PASS_DEF_DECOMPOSERESOURCEOPSPASS
+#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_device_passes.h.inc"
+
 struct DecomposeResourceOpsPass
-    : public DecomposeResourceOpsPassBase<DecomposeResourceOpsPass> {
+    : public impl::DecomposeResourceOpsPassBase<DecomposeResourceOpsPass> {
   void runOnOperation() override {
     // Add lowering patterns to the list.
     RewritePatternSet patterns(&getContext());
     TF::PopulateDecomposeResourceOpsPatterns(&getContext(), &patterns);
 
-    if (failed(applyPatternsAndFoldGreedily(getOperation(),
-                                            std::move(patterns)))) {
+    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       getOperation().emitError() << kBadDecompositionMessage;
       signalPassFailure();
     }
   }
 };
 
+#define GEN_PASS_DEF_DECOMPOSERESOURCEOPSINCLUSTERPASS
+#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_device_passes.h.inc"
+
 struct DecomposeResourceOpsInClusterPass
-    : public DecomposeResourceOpsInClusterPassBase<
+    : public impl::DecomposeResourceOpsInClusterPassBase<
           DecomposeResourceOpsInClusterPass> {
   void runOnOperation() override {
     // Add lowering patterns to the list.

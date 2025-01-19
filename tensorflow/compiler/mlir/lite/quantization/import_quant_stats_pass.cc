@@ -13,27 +13,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "absl/memory/memory.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "absl/strings/str_split.h"
 #include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/FakeQuantSupport.h"  // from @llvm-project
-#include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project
-#include "mlir/IR/AffineExpr.h"  // from @llvm-project
-#include "mlir/IR/AffineMap.h"  // from @llvm-project
+#include "mlir/Dialect/Quant/IR/Quant.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
+#include "mlir/IR/Builders.h"  // from @llvm-project
+#include "mlir/IR/BuiltinAttributeInterfaces.h"  // from @llvm-project
+#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
+#include "mlir/IR/DialectRegistry.h"  // from @llvm-project
 #include "mlir/IR/Location.h"  // from @llvm-project
-#include "mlir/IR/PatternMatch.h"  // from @llvm-project
+#include "mlir/IR/OpDefinition.h"  // from @llvm-project
+#include "mlir/IR/Operation.h"  // from @llvm-project
+#include "mlir/IR/Value.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "mlir/Pass/PassRegistry.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "mlir/Support/TypeID.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/lite/quantization/ir/QuantOps.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_info.pb.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/import_utils.h"
@@ -76,7 +85,8 @@ class ImportQuantStatsPass
   void runOnOperation() override;
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<quant::QuantizationDialect>();
+    registry.insert<quant::QuantDialect,
+                    quantfork::QuantizationForkDialect>();
   }
 
   // Parses the serialized quant stats protobuf and initialize the internal
@@ -139,8 +149,8 @@ void ImportQuantStatsPass::InsertStatsOpAtResult(OpBuilder b, Value res,
                                                  ElementsAttr layer_stats,
                                                  ElementsAttr axis_stats,
                                                  IntegerAttr axis) {
-  auto stats_op = b.create<quant::StatisticsOp>(b.getUnknownLoc(), res,
-                                                layer_stats, axis_stats, axis);
+  auto stats_op = b.create<quantfork::StatisticsOp>(
+      b.getUnknownLoc(), res, layer_stats, axis_stats, axis);
   res.replaceAllUsesWith(stats_op);
   stats_op.getOperation()->replaceUsesOfWith(stats_op, res);
 }
@@ -213,7 +223,7 @@ void ImportQuantStatsPass::runOnOperation() {
 // Creates an instance of the default quant parameters pass.
 std::unique_ptr<OperationPass<func::FuncOp>> CreateImportQuantStatsPass(
     OperationToName op_to_name, const std::string &stats_str) {
-  auto pass = absl::make_unique<ImportQuantStatsPass>(op_to_name);
+  auto pass = std::make_unique<ImportQuantStatsPass>(op_to_name);
   if (pass->ParseQuantStats(stats_str)) return nullptr;
   return pass;
 }

@@ -15,15 +15,16 @@
 """Deprecation tests."""
 
 # pylint: disable=unused-import
+
 import collections
 import enum
 
 import numpy as np
 
-
 from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
-from tensorflow.python.framework import ops
+from tensorflow.python.framework import strict_mode
+from tensorflow.python.framework import tensor
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import test
@@ -185,6 +186,18 @@ class DeprecationTest(test.TestCase):
 
     _fn()
     self.assertEqual(2, mock_warning.call_count)
+
+  def test_strict_mode_deprecation(self):
+    date = "2016-07-04"
+    instructions = "This is how you update..."
+
+    @deprecation.deprecated(date, instructions, warn_once=True)
+    def _fn():
+      pass
+
+    strict_mode.enable_strict_mode()
+    with self.assertRaises(RuntimeError):
+      _fn()
 
   def _assert_subset(self, expected_subset, actual_set):
     self.assertTrue(
@@ -1062,14 +1075,14 @@ class DeprecatedArgValuesTest(test.TestCase):
     def _fn(arg0):  # pylint: disable=unused-argument
       pass
 
-    ops.enable_tensor_equality()
+    tensor.enable_tensor_equality()
     initial_count = mock_warning.call_count
     # Check that we avoid error from explicit `var == None` check.
     _fn(arg0=variables.Variable(0))
     self.assertEqual(initial_count, mock_warning.call_count)
     _fn(arg0=None)
     self.assertEqual(initial_count + 1, mock_warning.call_count)
-    ops.disable_tensor_equality()
+    tensor.disable_tensor_equality()
 
 
 class DeprecationArgumentsTest(test.TestCase):
@@ -1121,11 +1134,25 @@ class DeprecatedEndpointsTest(test.TestCase):
     self.assertEqual(("foo1", "foo2"), foo._tf_deprecated_api_names)
 
   def testCannotSetDeprecatedEndpointsTwice(self):
-    with self.assertRaises(deprecation.DeprecatedNamesAlreadySet):
+    with self.assertRaises(deprecation.DeprecatedNamesAlreadySetError):
       @deprecation.deprecated_endpoints("foo1")
       @deprecation.deprecated_endpoints("foo2")
       def foo():  # pylint: disable=unused-variable
         pass
+
+
+class DeprecateMovedModuleTest(test.TestCase):
+
+  @test.mock.patch.object(logging, "warning", autospec=True)
+  def testCallDeprecatedModule(self, mock_warning):
+    from tensorflow.python.util import deprecated_module  # pylint: disable=g-import-not-at-top
+    self.assertEqual(0, mock_warning.call_count)
+    result = deprecated_module.a()
+    self.assertEqual(1, mock_warning.call_count)
+    self.assertEqual(1, result)
+
+    deprecated_module.a()
+    self.assertEqual(1, mock_warning.call_count)
 
 
 if __name__ == "__main__":

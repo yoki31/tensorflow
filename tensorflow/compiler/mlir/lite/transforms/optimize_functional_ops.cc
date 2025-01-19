@@ -13,42 +13,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <utility>
+
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
-#include "mlir/IR/BlockAndValueMapping.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
+#include "mlir/IR/IRMapping.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/IR/TypeUtilities.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
+#include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
+#include "tensorflow/compiler/mlir/lite/transforms/passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
 
 namespace mlir {
 namespace TFL {
 namespace {
+#define GEN_PASS_DEF_OPTIMIZEFUNCTIONALOPSPASS
+#include "tensorflow/compiler/mlir/lite/transforms/passes.h.inc"
 
 // Module pass to optimize TensorFlow functional ops.
 struct OptimizeFunctionalOpsPass
-    : public PassWrapper<OptimizeFunctionalOpsPass, OperationPass<ModuleOp>> {
+    : public impl::OptimizeFunctionalOpsPassBase<OptimizeFunctionalOpsPass> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OptimizeFunctionalOpsPass)
 
   void runOnOperation() override;
-
-  StringRef getArgument() const final {
-    // This is the argument used to refer to the pass in
-    // the textual format (on the commandline for example).
-    return "tfl-optimize-functional-ops";
-  }
-  StringRef getDescription() const final {
-    // This is a brief description of the pass.
-    return "Optimize TensorFlow functional ops";
-  }
 };
 
 // Updates function return type of the given functions to match the terminator
@@ -60,7 +57,7 @@ void UpdateFuncType(func::FuncOp func) {
   auto return_types = llvm::to_vector<4>(terminator->getOperandTypes());
 
   FunctionType func_type = func.getFunctionType();
-  if (llvm::makeArrayRef(return_types) == func_type.getResults()) return;
+  if (llvm::ArrayRef(return_types) == func_type.getResults()) return;
 
   auto updated_type =
       FunctionType::get(func.getContext(), func_type.getInputs(), return_types);
@@ -71,7 +68,7 @@ void UpdateFuncType(func::FuncOp func) {
 bool IsSideEffectFree(func::FuncOp func) {
   return !func.getBody()
               .walk([&](Operation* op) {
-                if (!MemoryEffectOpInterface::hasNoEffect(op) &&
+                if (!isMemoryEffectFree(op) &&
                     !op->hasTrait<OpTrait::IsTerminator>())
                   return WalkResult::interrupt();
                 return WalkResult::advance();
@@ -103,7 +100,7 @@ class FoldIfOp : public OpRewritePattern<TF::IfOp> {
     // remove.
     // TODO(jpienaar): Remove once recusive side-effects are supported.
     if (op.use_empty() &&
-        (op.is_stateless() ||
+        (op.getIsStateless() ||
          (IsSideEffectFree(then_func) && IsSideEffectFree(else_func)))) {
       rewriter.eraseOp(op.getOperation());
       return success();
@@ -111,10 +108,10 @@ class FoldIfOp : public OpRewritePattern<TF::IfOp> {
 
     // Extract the constant cond value.
     DenseElementsAttr cond;
-    if (!matchPattern(op.cond(), m_Constant(&cond))) return failure();
+    if (!matchPattern(op.getCond(), m_Constant(&cond))) return failure();
 
     // TODO(hinsu): Handle constants that are not scalar booleans.
-    auto cond_type = cond.getType().dyn_cast<RankedTensorType>();
+    auto cond_type = mlir::dyn_cast<RankedTensorType>(cond.getType());
     if (!cond_type || !cond_type.getShape().equals({}) ||
         !cond_type.getElementType().isInteger(/*width=*/1))
       return failure();
@@ -128,7 +125,7 @@ class FoldIfOp : public OpRewritePattern<TF::IfOp> {
     // one blocks are not encountered in practice.
     if (!llvm::hasSingleElement(func)) return failure();
 
-    BlockAndValueMapping mapper;
+    IRMapping mapper;
     for (int i = 0, e = func.getNumArguments(); i != e; ++i)
       mapper.map(func.getArgument(i), op.getOperand(i + 1));
 
@@ -163,10 +160,8 @@ void OptimizeFunctionalOpsPass::runOnOperation() {
   patterns.add<FoldIfOp>(&getContext());
 
   ModuleOp module = getOperation();
-  (void)applyPatternsAndFoldGreedily(module, std::move(patterns));
+  (void)applyPatternsGreedily(module, std::move(patterns));
 }
-
-PassRegistration<OptimizeFunctionalOpsPass> pass;
 }  // namespace
 
 std::unique_ptr<OperationPass<ModuleOp>> CreateOptimizeFunctionalOpsPass() {

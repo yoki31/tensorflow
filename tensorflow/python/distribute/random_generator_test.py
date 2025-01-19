@@ -18,7 +18,7 @@ import functools
 import os
 
 from absl.testing import parameterized
-
+from tensorflow.python.checkpoint import checkpoint as tracking_util
 from tensorflow.python.compat import v2_compat
 from tensorflow.python.distribute import combinations as ds_combinations
 from tensorflow.python.distribute import multi_process_runner
@@ -34,11 +34,12 @@ from tensorflow.python.framework import test_combinations as combinations
 from tensorflow.python.framework import test_util
 from tensorflow.python.module import module
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import array_ops_stack
 from tensorflow.python.ops import stateful_random_ops as rng
 from tensorflow.python.platform import test
 from tensorflow.python.saved_model import load
 from tensorflow.python.saved_model import save
-from tensorflow.python.training.tracking import util as tracking_util
+from tensorflow.python.util import deprecation
 
 
 def get_num_local_replicas(strat, values=None):
@@ -108,7 +109,7 @@ class GeneratorTest(test.TestCase, parameterized.TestCase):
       def f():
         t1 = gen.uniform_full_int(shape=shape, dtype=dtype)
         t2 = gen.uniform_full_int(shape=shape, dtype=dtype)
-        t = array_ops.stack([t1, t2])
+        t = array_ops_stack.stack([t1, t2])
         return t
 
       results = strat.extended.call_for_each_replica(fn=f)
@@ -136,7 +137,7 @@ class GeneratorTest(test.TestCase, parameterized.TestCase):
       def f(gen):
         t1 = gen.uniform_full_int(shape=shape, dtype=dtype)
         t2 = gen.uniform_full_int(shape=shape, dtype=dtype)
-        t = array_ops.stack([t1, t2])
+        t = array_ops_stack.stack([t1, t2])
         return t
 
       results = strat.extended.call_for_each_replica(fn=f, args=gens)
@@ -192,7 +193,7 @@ class GeneratorTest(test.TestCase, parameterized.TestCase):
       def f():
         t1 = gen.uniform_full_int(shape=shape, dtype=dtype)
         t2 = gen.uniform_full_int(shape=shape, dtype=dtype)
-        t = array_ops.stack([t1, t2])
+        t = array_ops_stack.stack([t1, t2])
         return t
       replica_fn = def_function.function(f) if jit_replica_fn else f
       results = run_on_strategy(replica_fn, strat, coord)
@@ -246,7 +247,7 @@ class GeneratorTest(test.TestCase, parameterized.TestCase):
       def f(gen):  # the main focus
         t1 = gen.uniform_full_int(shape=shape, dtype=dtype)
         t2 = gen.uniform_full_int(shape=shape, dtype=dtype)
-        t = array_ops.stack([t1, t2])
+        t = array_ops_stack.stack([t1, t2])
         return t
       def g():
         return f(gen)
@@ -359,4 +360,5 @@ class GeneratorTest(test.TestCase, parameterized.TestCase):
 
 
 if __name__ == "__main__":
-  multi_process_runner.test_main()
+  with deprecation.silence():
+    multi_process_runner.test_main()

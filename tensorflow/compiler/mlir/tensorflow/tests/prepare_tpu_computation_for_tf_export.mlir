@@ -3,8 +3,8 @@
 // CHECK-LABEL: @ShardingAttr
 func.func @ShardingAttr(%arg0: tensor<128x10xf32> {mhlo.sharding = "\08\03\1A\02\01\02\22\02\00\01"}, %arg1: tensor<10x1024xf32> {mhlo.sharding = "\08\01\1A\01\01\22\01\00"}, %arg2: tensor<128x1024xf32> {mhlo.sharding = ""}) -> (tensor<128x10xf32>, tensor<10x1024xf32>, tensor<128x1024xf32>) {
 
-  // CHECK: %[[SHARDED_ARG0:.*]] = "tf.XlaSharding"(%arg0) {_XlaSharding = "\08\03\1A\02\01\02\22\02\00\01", sharding = "\08\03\1A\02\01\02\22\02\00\01"}
-  // CHECK: %[[SHARDED_ARG1:.*]] = "tf.XlaSharding"(%arg1) {_XlaSharding = "\08\01\1A\01\01\22\01\00", sharding = "\08\01\1A\01\01\22\01\00"}
+  // CHECK: %[[SHARDED_ARG0:.*]] = "tf.XlaSharding"(%arg0) <{_XlaSharding = "\08\03\1A\02\01\02\22\02\00\01", sharding = "\08\03\1A\02\01\02\22\02\00\01"}>
+  // CHECK: %[[SHARDED_ARG1:.*]] = "tf.XlaSharding"(%arg1) <{_XlaSharding = "\08\01\1A\01\01\22\01\00", sharding = "\08\01\1A\01\01\22\01\00"}>
 
   // CHECK: "tf.Identity"(%[[SHARDED_ARG1]])
   %0 = "tf.Identity"(%arg1) : (tensor<10x1024xf32>) -> tensor<10x1024xf32>
@@ -35,7 +35,7 @@ func.func @RewriteHostComputeMlirOp(%arg0: tensor<*xf32>, %arg1: tensor<3x?xf64>
   // CHECK-SAME: [[ID_OUTPUT]]
   // CHECK-SAME: key = "host_compute_channel_recv"
 
-  %0:2 = "tf._XlaHostComputeMlir"(%arg0, %arg1) {recv_key = "host_compute_channel_recv", send_key = "host_compute_channel_send", tpu_core = 0, host_mlir_module = "module  {\0A  func @host_func(%arg0: tensor<*xf32>, %arg1: tensor<3x?xf64>) -> (tensor<*xf32>, tensor<3x?xf64>) {\0A    %0 = \22tf.Identity\22(%arg0) {_xla_outside_compilation = \22cluster1\22} : (tensor<*xf32>) -> tensor<*xf32> \0A    return %0, %arg1 : tensor<*xf32>, tensor<3x?xf64> \0A  } \0A} \0A"} : (tensor<*xf32>, tensor<3x?xf64>) -> (tensor<*xf32>, tensor<3x?xf64>)
+  %0:2 = "tf._XlaHostComputeMlir"(%arg0, %arg1) {recv_key = "host_compute_channel_recv", send_key = "host_compute_channel_send", host_mlir_module = "module  {\0A  func.func @host_func(%arg0: tensor<*xf32>, %arg1: tensor<3x?xf64>) -> (tensor<*xf32>, tensor<3x?xf64>) {\0A    %0 = \22tf.Identity\22(%arg0) {_xla_outside_compilation = \22cluster1\22} : (tensor<*xf32>) -> tensor<*xf32> \0A    func.return %0, %arg1 : tensor<*xf32>, tensor<3x?xf64> \0A  } \0A} \0A"} : (tensor<*xf32>, tensor<3x?xf64>) -> (tensor<*xf32>, tensor<3x?xf64>)
   func.return %0#0 : tensor<*xf32>
 }
 
@@ -59,7 +59,7 @@ func.func @CommunicateOpTokenAttrs() -> () {
   "tf.XlaSendToHost"(%0) {key = "send_key"} : (tensor<i32>) -> ()
 
   // CHECK: _xla_original_oc_node_name = [[NODE_NAME3:.*]], _xla_token_input_nodes = {{\[}}[[NODE_NAME2]]{{\]}}
-  %1 = "tf._XlaHostComputeMlir"(%0) {recv_key = "host_compute_channel_recv1", send_key = "host_compute_channel_send1", tpu_core = 0, host_mlir_module = ""} : (tensor<i32>) -> (tensor<f32>)
+  %1 = "tf._XlaHostComputeMlir"(%0) {recv_key = "host_compute_channel_recv1", send_key = "host_compute_channel_send1", host_mlir_module = ""} : (tensor<i32>) -> (tensor<f32>)
   func.return
 }
 
@@ -162,4 +162,30 @@ func.func @UnsupportedOp(%arg0: tensor<i32>) -> tensor<i32> {
   %0 = "tf.CustomTestOp"(%arg0) {config = "", config_proto = "", executor_type = "", f = @Callee} : (tensor<i32>) -> (tensor<i32>)
   func.return %0 : tensor<i32>
 }
+
+// -----
+
+// _XlaHostComputeMlir with manual_sharding should not fall back to
+// XlaHostCompute, because XlaHostCompute does not support manual_sharding.
+// Instead, it is skipped and the MlirXlaOpKernel is expected to handle it.
+
+func.func @HostComputeManualNoFallback(%arg0: tensor<i32>) -> () {
+  // CHECK: "tf._XlaHostComputeMlir"
+  %1 = "tf._XlaHostComputeMlir"(%arg0) {recv_key = "host_compute_channel_recv1", send_key = "host_compute_channel_send1", host_mlir_module = "", manual_sharding = true} : (tensor<i32>) -> (tensor<f32>)
+  func.return
+}
+
+// -----
+
+// CHECK-LABEL: test_xla_call_module_with_host_communicative_subcomputation
+func.func @test_xla_call_module_with_host_communicative_subcomputation() {
+  "tf.XlaCallModule"() {Sout = [], device = "", dim_args_spec = [], function_list = [@callee], module = "", platforms = [], version = 4 : i64} : () -> ()
+  func.return
+}
+
+// CHECK-LABEL: callee
+func.func private @callee(%arg0: tensor<i32>) {
+   "tf.XlaHostCompute"(%arg0) <{ancestors = [],  key = "@host_func", recv_key = "", send_key = "", shapes = []}> {_xla_original_oc_node_name = "hcb0", _xla_token_input_nodes = ["_xla_token_arg_node"]} : (tensor<i32>) -> ()
+   return
+ }
 

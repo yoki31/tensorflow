@@ -15,46 +15,64 @@ limitations under the License.
 
 #include "tensorflow/core/transforms/consolidate_attrs/pass.h"
 
+#include <cassert>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
-#include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
+#include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Attributes.h"  // from @llvm-project
+#include "mlir/IR/Block.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinTypeInterfaces.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
+#include "mlir/IR/OperationSupport.h"  // from @llvm-project
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project
+#include "mlir/IR/Types.h"  // from @llvm-project
+#include "mlir/IR/Value.h"  // from @llvm-project
+#include "mlir/IR/ValueRange.h"  // from @llvm-project
+#include "mlir/Interfaces/FunctionInterfaces.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
+#include "mlir/Support/TypeID.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/core/ir/dialect.h"
+#include "tensorflow/core/ir/importexport/convert_tensor.h"
 #include "tensorflow/core/ir/ops.h"
 #include "tensorflow/core/ir/tf_op_wrapper.h"
 #include "tensorflow/core/ir/types/dialect.h"
 #include "tensorflow/core/ir/utility.h"
-#include "tensorflow/core/transforms/pass_detail.h"
 
 namespace mlir {
 namespace tfg {
+
+#define GEN_PASS_DEF_CONSOLIDATEATTRIBUTES
+#define GEN_PASS_DEF_PREPAREATTRIBUTESFOREXPORT
+#include "tensorflow/core/transforms/passes.h.inc"
 
 static const char *kRegenerateOutputShapes = "tfg.regenerate_output_shapes";
 
 // Returns true if an attribute is an array of shapes;
 static bool IsArrayOfShapes(ArrayAttr array) {
-  return llvm::all_of(array,
-                      [](Attribute attr) { return attr.isa<ShapeAttr>(); });
+  return llvm::all_of(
+      array, [](Attribute attr) { return mlir::isa<ShapeAttr>(attr); });
 }
 
 // Given a tensor type and shape information, try to refine the type.
 static Type GetReifiedType(Type orig, ShapeAttr shape) {
-  Type element_type = orig.cast<ShapedType>().getElementType();
+  Type element_type = mlir::cast<ShapedType>(orig).getElementType();
   TensorType inferred;
   if (shape.hasRank()) {
     // Replace dimensions less than -1 with ?
     SmallVector<int64_t> dims = llvm::to_vector(shape.getShape());
     for (int64_t &dim : dims)
       if (dim < -1) dim = -1;
-    inferred = RankedTensorType::get(dims, element_type);
+    inferred = GetTypeFromTFTensorShape(dims, element_type);
   } else {
     inferred = UnrankedTensorType::get(element_type);
   }
@@ -112,7 +130,7 @@ class ConsolidateAttributesPassImpl
  private:
   // Reify `tf._input_shapes`, `tf._output_shapes` and `tfg.handle_data` into
   // the types of the function arguments. Drop the attributes `tfg.dtype` and
-  // `tfg.is_ref`. Return the the new argument attributes.
+  // `tfg.is_ref`. Return the new argument attributes.
   ArrayAttr reifyAndDropFunctionArgumentAttributes(GraphFuncOp func);
   // Reify `tf._output_shapes` and `tfg.handle_data` into the types of the
   // function results. Drop the attribute `tfg.dtype`. Return the new result
@@ -131,11 +149,11 @@ Type ConsolidateAttributesPassImpl::refineTypeWithOutputShapes(
   // Get the output shapes attribute. If the attribute is not an array of
   // exactly one shape, ignore it.
   if (auto output_shapes =
-          attrs.get(output_shapes_id_).dyn_cast_or_null<ArrayAttr>()) {
+          mlir::dyn_cast_or_null<ArrayAttr>(attrs.get(output_shapes_id_))) {
     if (output_shapes.size() == 1 && IsArrayOfShapes(output_shapes)) {
       attrs.erase(output_shapes_id_);
       attrs.set(regenerate_output_shapes_id_, UnitAttr::get(&getContext()));
-      return GetReifiedType(type, output_shapes[0].cast<ShapeAttr>());
+      return GetReifiedType(type, mlir::cast<ShapeAttr>(output_shapes[0]));
     }
   }
   return type;
@@ -147,8 +165,9 @@ Type ConsolidateAttributesPassImpl::refineTypeWithHandleData(
   SmallVector<TensorType> subtypes;
   // Because `tfg.handle_data` is a TFG internal attribute, it will be
   // well-formed.
-  for (Type type : handle_data.cast<ArrayAttr>().getAsValueRange<TypeAttr>())
-    subtypes.push_back(type.cast<TensorType>());
+  for (Type type :
+       mlir::cast<ArrayAttr>(handle_data).getAsValueRange<TypeAttr>())
+    subtypes.push_back(mlir::cast<TensorType>(type));
   auto resource =
       UnrankedTensorType::get(ResourceType::get(subtypes, &getContext()));
   Type reified = tf_type::GetCastCompatibleType(resource, type);
@@ -161,7 +180,7 @@ ArrayAttr ConsolidateAttributesPassImpl::reifyAndDropFunctionArgumentAttributes(
   // we will ignore it. If it isn't an array of shapes or has an inconsistent
   // number of shapes, ignore it.
   ArrayAttr input_shapes =
-      func->getAttr(input_shapes_id_).dyn_cast_or_null<ArrayAttr>();
+      mlir::dyn_cast_or_null<ArrayAttr>(func->getAttr(input_shapes_id_));
   unsigned num_args = func.getNumArguments() / 2;
   if (input_shapes) {
     if (input_shapes.size() != num_args || !IsArrayOfShapes(input_shapes)) {
@@ -175,13 +194,15 @@ ArrayAttr ConsolidateAttributesPassImpl::reifyAndDropFunctionArgumentAttributes(
   SmallVector<Attribute> arg_attrs;
   auto empty_dict = DictionaryAttr::get(&getContext());
   for (auto i : llvm::seq<unsigned>(0, num_args)) {
-    BlockArgument arg = GraphFuncOp::getDataValue(func.body(), i);
-    NamedAttrList attrs(func.getArgAttrs(arg.getArgNumber()));
+    BlockArgument arg = GraphFuncOp::getDataValue(func.getBody(), i);
+    NamedAttrList attrs(
+        func.FunctionOpInterfaceTrait::getArgAttrs(arg.getArgNumber()));
     Type arg_type = arg.getType();
     arg_type = refineTypeWithOutputShapes(arg_type, attrs);
     arg_type = refineTypeWithHandleData(arg_type, attrs.erase(handle_data_id_));
     if (input_shapes)
-      arg_type = GetReifiedType(arg_type, input_shapes[i].cast<ShapeAttr>());
+      arg_type =
+          GetReifiedType(arg_type, mlir::cast<ShapeAttr>(input_shapes[i]));
     arg.setType(arg_type);
     attrs.erase(dtype_id_);
     attrs.erase(is_ref_id_);
@@ -192,11 +213,14 @@ ArrayAttr ConsolidateAttributesPassImpl::reifyAndDropFunctionArgumentAttributes(
 
 ArrayAttr ConsolidateAttributesPassImpl::reifyAndDropFunctionResultAttributes(
     GraphFuncOp func) {
+  ArrayAttr res_attrs = func.getAllResultAttrs();
+  if (!res_attrs) return ArrayAttr::get(&getContext(), {});
+
   SmallVector<Attribute> ret_attrs;
   // The result types are propagated to the data operands to `return`.
-  auto ret_op = cast<ReturnOp>(func.body().front().getTerminator());
-  for (auto &it :
-       llvm::enumerate(func.getAllResultAttrs().getAsRange<DictionaryAttr>())) {
+  auto ret_op = cast<ReturnOp>(func.getBody().front().getTerminator());
+  for (const auto &it :
+       llvm::enumerate(res_attrs.getAsRange<DictionaryAttr>())) {
     NamedAttrList attrs(it.value());
     Value ret = ret_op.getOperand(it.index());
     Type ret_type = ret.getType();
@@ -232,12 +256,12 @@ class ReifyOperationOutputShapes : public RewritePattern {
     // attribute, if it has an inconsistent number of shapes, or if it is not
     // an array of shapes.
     ArrayAttr output_shapes =
-        op->getAttr(output_shapes_id_).dyn_cast_or_null<ArrayAttr>();
+        mlir::dyn_cast_or_null<ArrayAttr>(op->getAttr(output_shapes_id_));
     if (!output_shapes || results.size() != output_shapes.size() ||
         !IsArrayOfShapes(output_shapes))
       return failure();
 
-    rewriter.updateRootInPlace(op, [&] {
+    rewriter.modifyOpInPlace(op, [&] {
       op->removeAttr(output_shapes_id_);
       assert(output_shapes.size() == results.size());
       for (auto it :
@@ -313,14 +337,14 @@ class DropAttributes : public RewritePattern {
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
     if (!isa<OpTs...>(op)) return failure();
-    rewriter.startRootUpdate(op);
+    rewriter.startOpModification(op);
     if (!llvm::count_if(attr_ids_, [&](StringAttr attr_id) {
           return op->removeAttr(attr_id);
         })) {
-      rewriter.cancelRootUpdate(op);
+      rewriter.cancelOpModification(op);
       return failure();
     }
-    rewriter.finalizeRootUpdate(op);
+    rewriter.finalizeOpModification(op);
     return success();
   }
 
@@ -340,7 +364,7 @@ void ConsolidateAttributesPassImpl::runOnOperation() {
   // Skip this pass on generic functions. Generic functions contain only opaque
   // tensor types, into which shape and data type info cannot be reified.
   auto func = dyn_cast<GraphFuncOp>(getOperation());
-  if (func && func.generic()) return;
+  if (func && func.getGeneric()) return;
 
   // Reify operation attributes.
   RewritePatternSet patterns(&getContext());
@@ -352,8 +376,7 @@ void ConsolidateAttributesPassImpl::runOnOperation() {
   patterns.add(
       RemoveAttributes<WhileOp, StatelessWhileOp, StatefulWhileOp, ForOp>(
           &getContext(), {"T"}));
-  if (failed(
-          applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
     getOperation()->emitError(getArgument() + " pass failed");
     signalPassFailure();
     return;
@@ -365,14 +388,14 @@ void ConsolidateAttributesPassImpl::runOnOperation() {
   if (!func) return;
   ArrayAttr arg_attrs = reifyAndDropFunctionArgumentAttributes(func);
   ArrayAttr res_attrs = reifyAndDropFunctionResultAttributes(func);
-  Block &body = func.body().front();
+  Block &body = func.getBody().front();
   auto type = FunctionType::get(
       &getContext(), body.getArgumentTypes(),
       TFOp(body.getTerminator()).getNonControlOperands().getTypes());
   NamedAttrList attrs(func->getAttrDictionary());
-  attrs.set(func.function_typeAttrName(), TypeAttr::get(type));
-  attrs.set(func.arg_attrsAttrName(), arg_attrs);
-  attrs.set(func.res_attrsAttrName(), res_attrs);
+  attrs.set(func.getFunctionTypeAttrName(), TypeAttr::get(type));
+  attrs.set(func.getArgAttrsAttrName(), arg_attrs);
+  attrs.set(func.getResAttrsAttrName(), res_attrs);
   func->setAttrs(attrs.getDictionary(&getContext()));
 }
 
@@ -400,9 +423,11 @@ void PrepareAttributesForExportPassImpl::prepareFunctionAttributes(
     GraphFuncOp func) {
   NamedAttrList attrs(func->getAttrDictionary());
   SmallVector<Attribute> input_shapes, arg_attrs, res_attrs;
-  for (auto it :
-       llvm::zip(func.getArgumentTypes(),
-                 func.getAllArgAttrs().getAsRange<DictionaryAttr>())) {
+
+  ArrayAttr func_arg_attrs = func.getAllArgAttrs();
+  if (!func_arg_attrs) func_arg_attrs = ArrayAttr::get(&getContext(), {});
+  for (auto it : llvm::zip(func.getArgumentTypes(),
+                           func_arg_attrs.getAsRange<DictionaryAttr>())) {
     Type type = std::get<0>(it);
     DictionaryAttr attrs = std::get<1>(it);
     if (type == control_type_) {
@@ -410,22 +435,26 @@ void PrepareAttributesForExportPassImpl::prepareFunctionAttributes(
       continue;
     }
     arg_attrs.push_back(prepareAttributesFor(type, attrs));
-    if (auto ranked = type.dyn_cast<RankedTensorType>()) {
+    if (auto ranked = mlir::dyn_cast<RankedTensorType>(type)) {
       input_shapes.push_back(ShapeAttr::get(&getContext(), ranked.getShape()));
     } else {
-      input_shapes.push_back(ShapeAttr::get(&getContext(), llvm::None));
+      input_shapes.push_back(ShapeAttr::get(&getContext(), std::nullopt));
     }
   }
-  for (auto it :
-       llvm::zip(func.getResultTypes(),
-                 func.getAllResultAttrs().getAsRange<DictionaryAttr>()))
+
+  ArrayAttr func_res_attrs = func.getAllResultAttrs();
+  if (!func_res_attrs) func_res_attrs = ArrayAttr::get(&getContext(), {});
+  for (auto it : llvm::zip(func.getResultTypes(),
+                           func_res_attrs.getAsRange<DictionaryAttr>()))
     res_attrs.push_back(prepareAttributesFor(std::get<0>(it), std::get<1>(it)));
 
   // Add input shapes only if its regeneration is required.
   if (attrs.erase(regenerate_input_shapes_id_))
     attrs.set(input_shapes_id_, ArrayAttr::get(&getContext(), input_shapes));
-  attrs.set(func.arg_attrsAttrName(), ArrayAttr::get(&getContext(), arg_attrs));
-  attrs.set(func.res_attrsAttrName(), ArrayAttr::get(&getContext(), res_attrs));
+  attrs.set(func.getArgAttrsAttrName(),
+            ArrayAttr::get(&getContext(), arg_attrs));
+  attrs.set(func.getResAttrsAttrName(),
+            ArrayAttr::get(&getContext(), res_attrs));
   func->setAttrs(attrs.getDictionary(&getContext()));
 }
 
@@ -434,14 +463,14 @@ DictionaryAttr PrepareAttributesForExportPassImpl::prepareAttributesFor(
   NamedAttrList attrs(attr_dict);
   // Add shape data if requested.
   if (attrs.erase(regenerate_output_shapes_id_)) {
-    auto shape = ShapeAttr::get(&getContext(),
-                                type.isa<RankedTensorType>()
-                                    ? type.cast<RankedTensorType>().getShape()
-                                    : Optional<ArrayRef<int64_t>>());
+    auto shape = ShapeAttr::get(
+        &getContext(), mlir::isa<RankedTensorType>(type)
+                           ? mlir::cast<RankedTensorType>(type).getShape()
+                           : std::optional<ArrayRef<int64_t>>());
     attrs.set(output_shapes_id_, ArrayAttr::get(&getContext(), {shape}));
   }
-  auto element_type = type.cast<TensorType>().getElementType();
-  if (auto resource = element_type.dyn_cast<ResourceType>()) {
+  auto element_type = mlir::cast<TensorType>(type).getElementType();
+  if (auto resource = mlir::dyn_cast<ResourceType>(element_type)) {
     SmallVector<Attribute> handle_data;
     for (TensorType subtype : resource.getSubtypes())
       handle_data.push_back(TypeAttr::get(subtype));
@@ -449,7 +478,7 @@ DictionaryAttr PrepareAttributesForExportPassImpl::prepareAttributesFor(
     if (!handle_data.empty())
       attrs.set(handle_data_id_, ArrayAttr::get(&getContext(), handle_data));
   }
-  if (element_type.isa<tf_type::TensorFlowRefType>())
+  if (mlir::isa<tf_type::TensorFlowRefType>(element_type))
     attrs.set(is_ref_id_, UnitAttr::get(&getContext()));
   return attrs.getDictionary(&getContext());
 }
@@ -459,8 +488,8 @@ static ArrayAttr GetElementTypesAttr(PatternRewriter &rewriter,
                                      ValueRange values) {
   SmallVector<Attribute> types;
   for (Value value : values) {
-    types.push_back(
-        TypeAttr::get(value.getType().cast<TensorType>().getElementType()));
+    types.push_back(TypeAttr::get(
+        mlir::cast<TensorType>(value.getType()).getElementType()));
   }
   return rewriter.getArrayAttr(types);
 }
@@ -482,7 +511,7 @@ class MaterializeAttrsPattern : public OpRewritePattern<OpT> {
   ArrayAttr getArgumentElementTypesAttr(PatternRewriter &rewriter,
                                         OpT op) const {
     return GetElementTypesAttr(
-        rewriter, SplitDataAndControlValues(op.args(), control_type_).first);
+        rewriter, SplitDataAndControlValues(op.getArgs(), control_type_).first);
   }
 
  private:
@@ -497,16 +526,17 @@ struct MaterializeIfAttrs : public MaterializeAttrsPattern<IfLikeOp> {
   // Materialize `Tcond`, `Tin`, and `Tout`.
   LogicalResult matchAndRewrite(IfLikeOp op,
                                 PatternRewriter &rewriter) const override {
-    if (op.Tcond() && op.Tin() && op.Tout()) return failure();
+    if (op.getTcond() && op.getTin() && op.getTout()) return failure();
     NamedAttrList attrs(op->getAttrDictionary());
     attrs.set(
-        op.TcondAttrName(),
+        op.getTcondAttrName(),
         TypeAttr::get(
-            op.cond().getType().template cast<TensorType>().getElementType()));
-    attrs.set(op.TinAttrName(),
+            mlir::cast<TensorType>(op.getCond().getType()).getElementType()));
+    attrs.set(op.getTinAttrName(),
               this->getArgumentElementTypesAttr(rewriter, op));
-    attrs.set(op.ToutAttrName(), GetElementTypesAttr(rewriter, op.outs()));
-    rewriter.updateRootInPlace(
+    attrs.set(op.getToutAttrName(),
+              GetElementTypesAttr(rewriter, op.getOuts()));
+    rewriter.modifyOpInPlace(
         op, [&] { op->setAttrs(attrs.getDictionary(op->getContext())); });
     return success();
   }
@@ -519,12 +549,13 @@ struct MaterializeCaseAttrs : public MaterializeAttrsPattern<CaseLikeOp> {
   // Materialize `Tin` and `Tout`.
   LogicalResult matchAndRewrite(CaseLikeOp op,
                                 PatternRewriter &rewriter) const override {
-    if (op.Tin() && op.Tout()) return failure();
+    if (op.getTin() && op.getTout()) return failure();
     NamedAttrList attrs(op->getAttrDictionary());
-    attrs.set(op.TinAttrName(),
+    attrs.set(op.getTinAttrName(),
               this->getArgumentElementTypesAttr(rewriter, op));
-    attrs.set(op.ToutAttrName(), GetElementTypesAttr(rewriter, op.outs()));
-    rewriter.updateRootInPlace(
+    attrs.set(op.getToutAttrName(),
+              GetElementTypesAttr(rewriter, op.getOuts()));
+    rewriter.modifyOpInPlace(
         op, [&] { op->setAttrs(attrs.getDictionary(op->getContext())); });
     return success();
   }
@@ -537,9 +568,10 @@ struct MaterializeTAttr : public MaterializeAttrsPattern<WhileOrForLikeOp> {
   // Materialize `T`.
   LogicalResult matchAndRewrite(WhileOrForLikeOp op,
                                 PatternRewriter &rewriter) const override {
-    if (op.T()) return failure();
-    rewriter.updateRootInPlace(
-        op, [&] { op.TAttr(this->getArgumentElementTypesAttr(rewriter, op)); });
+    if (op.getT()) return failure();
+    rewriter.modifyOpInPlace(op, [&] {
+      op.setTAttr(this->getArgumentElementTypesAttr(rewriter, op));
+    });
     return success();
   }
 };
@@ -563,13 +595,13 @@ class MaterializeOutputShapesBase : public RewritePattern {
 
     SmallVector<Attribute> shapes;
     for (Value result : results) {
-      if (auto ranked = result.getType().dyn_cast<RankedTensorType>()) {
+      if (auto ranked = mlir::dyn_cast<RankedTensorType>(result.getType())) {
         shapes.push_back(ShapeAttr::get(op->getContext(), ranked.getShape()));
       } else {
-        shapes.push_back(ShapeAttr::get(op->getContext(), llvm::None));
+        shapes.push_back(ShapeAttr::get(op->getContext(), std::nullopt));
       }
     }
-    rewriter.updateRootInPlace(op, [&] {
+    rewriter.modifyOpInPlace(op, [&] {
       op->setAttr(attr_id_, rewriter.getArrayAttr(shapes));
       rewriteImpl(op, rewriter);
     });
@@ -630,7 +662,7 @@ void PrepareAttributesForExportPassImpl::runOnOperation() {
   // Skip this pass on generic functions. Generic functions contain only opaque
   // tensor types, into which shape and data type info cannot be reified.
   auto func = dyn_cast<GraphFuncOp>(getOperation());
-  if (func && func.generic()) return;
+  if (func && func.getGeneric()) return;
 
   RewritePatternSet patterns(&getContext());
   ControlType control_type = ControlType::get(&getContext());
@@ -642,8 +674,7 @@ void PrepareAttributesForExportPassImpl::runOnOperation() {
                  ForOp>(patterns, control_type);
   patterns.insert<MaterializeTFGOpOutputShapes, MaterializeCFOpOutputShapes>(
       &getContext());
-  if (failed(
-          applyPatternsAndFoldGreedily(getOperation(), std::move(patterns)))) {
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
     getOperation()->emitError(getArgument() + " pass failed");
     signalPassFailure();
     return;
@@ -656,7 +687,7 @@ void PrepareAttributesForExportPassImpl::runOnOperation() {
 
 namespace {
 struct ConsolidateAttributesPass
-    : public ConsolidateAttributesBase<ConsolidateAttributesPass> {
+    : public impl::ConsolidateAttributesBase<ConsolidateAttributesPass> {
   void runOnOperation() override {
     // Run the sub-pass on both `tfg.graph` and `tfg.func`.
     PassManager mgr(&getContext());
@@ -669,7 +700,8 @@ struct ConsolidateAttributesPass
 };
 
 struct PrepareAttributesForExportPass
-    : public PrepareAttributesForExportBase<PrepareAttributesForExportPass> {
+    : public impl::PrepareAttributesForExportBase<
+          PrepareAttributesForExportPass> {
   void runOnOperation() override {
     // Run the sub-pass on both `tfg.graph` and `tfg.func`.
     PassManager mgr(&getContext());

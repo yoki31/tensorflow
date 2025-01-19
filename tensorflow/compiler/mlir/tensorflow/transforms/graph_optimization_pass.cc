@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/tensorflow/transforms/graph_optimization_pass.h"
 
+#include <string>
+
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
@@ -27,20 +29,21 @@ limitations under the License.
 namespace mlir {
 namespace TF {
 namespace {
-using Status = ::tensorflow::Status;
+using Status = absl::Status;
 using ConfigProto = ::tensorflow::ConfigProto;
 using Graph = ::tensorflow::Graph;
 }  // namespace
 
 Status MlirGraphOptimizationPass::Run(
-    const ConfigProto& config_proto, ModuleOp module, const Graph& graph,
+    const std::string& function_name, const ConfigProto& config_proto,
+    ModuleOp module, const Graph& graph,
     const tensorflow::FunctionLibraryDefinition& function_library) {
   if (GetPassState(/*device_set=*/nullptr, config_proto, graph,
                    function_library) ==
       ::tensorflow::MlirOptimizationPassState::Disabled) {
     VLOG(1) << "Skipping MLIR Graph Optimization Pass"
             << ", session flag not enabled";
-    return Status::OK();
+    return absl::OkStatus();
   }
 
   VLOG(1) << "Run MLIR Graph Optimization Passes";

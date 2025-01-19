@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <memory>
+#include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -62,7 +63,7 @@ void DeviceTransformNNAPIPass::runOnOperation() {
   auto* ctx = &getContext();
   NNAPIHardware nnapi_hardware;
   RewritePatternSet patterns = nnapi_hardware.GetTransformations(ctx);
-  (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
+  (void)applyPatternsGreedily(func, std::move(patterns));
 }
 
 }  // namespace

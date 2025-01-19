@@ -19,11 +19,13 @@ limitations under the License.
 #include <vector>
 
 #include "absl/time/time.h"
-#include "tensorflow/c/eager/c_api.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/status.h"
+
+// Forward declare TFE_Context to avoid interface depending on c_api.
+typedef struct TFE_Context TFE_Context;
 
 namespace tensorflow {
 namespace dtensor {
@@ -35,11 +37,12 @@ class TpuSystemInterface {
  public:
   virtual ~TpuSystemInterface() = default;
 
-  virtual Status Initialize(OpKernelContext* ctx, ResourceMgr* rmgr,
-                            absl::Duration retry_timeout,
-                            std::vector<int32>* core_id_output_vec) = 0;
+  virtual absl::Status Initialize(OpKernelContext* ctx, ResourceMgr* rmgr,
+                                  absl::Duration retry_timeout,
+                                  std::vector<int32>* core_id_output_vec,
+                                  bool use_tfrt_host_runtime) = 0;
 
-  virtual Status Shutdown() = 0;
+  virtual absl::Status Shutdown() = 0;
 
   virtual std::vector<std::vector<int>> TPUCoreIDsToLocations(
       TFE_Context* context, const std::vector<int>& tpu_core_ids) = 0;

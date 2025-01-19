@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "llvm/Support/LogicalResult.h"
+#include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
 #include "tensorflow/core/ir/dialect.h"
@@ -24,6 +26,9 @@ int main(int argc, char **argv) {
   mlir::DialectRegistry registry;
   mlir::registerCanonicalizerPass();
   mlir::registerPrintOpStatsPass();
+  mlir::registerViewOpGraphPass();
+  mlir::registerSymbolDCEPass();
+  mlir::registerSymbolPrivatizePass();
   mlir::tfg::registerTFGraphPasses();
   registry.insert<mlir::tfg::TFGraphDialect, mlir::tf_type::TFTypeDialect>();
   // Inject the op registry.

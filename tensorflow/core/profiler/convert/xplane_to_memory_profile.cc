@@ -28,6 +28,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "xla/tsl/profiler/utils/tf_xplane_visitor.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
@@ -35,7 +36,6 @@ limitations under the License.
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/profiler/protobuf/memory_profile.pb.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
-#include "tensorflow/core/profiler/utils/tf_xplane_visitor.h"
 #include "tensorflow/core/profiler/utils/xplane_schema.h"
 #include "tensorflow/core/profiler/utils/xplane_utils.h"
 #include "tensorflow/core/profiler/utils/xplane_visitor.h"
@@ -82,14 +82,15 @@ void UpdateProfileSummary(const MemoryAggregationStats& stats,
 
 // Generate memory profile proto by processing host trace XPlane.
 MemoryProfile GenerateMemoryProfile(const XPlane* host_trace) {
-  XPlaneVisitor plane = CreateTfXPlaneVisitor(host_trace);
+  XPlaneVisitor plane = tsl::profiler::CreateTfXPlaneVisitor(host_trace);
   MemoryProfile memory_profile;
   // Iterate over all XEvents in the XPlane, and add the XStats to a new
   // MemoryProfileSnapshot if the EventType is kMemoryAllocation or
   // kMemoryDeallocation.
   plane.ForEachLine([&](const XLineVisitor& line) {
     line.ForEachEvent([&](const XEventVisitor& event) {
-      int64_t event_type = event.Type().value_or(kUnknownHostEventType);
+      int64_t event_type =
+          event.Type().value_or(HostEventType::kUnknownHostEventType);
       if (!(IsMemoryAllocation(event_type) ||
             IsMemoryDeallocation(event_type))) {
         return;
@@ -526,7 +527,8 @@ void ProcessMemoryProfileProto(int64_t max_num_snapshots,
 }
 
 template <typename Proto>
-Status ConvertProtoToJson(const Proto& proto_output, std::string* json_output) {
+absl::Status ConvertProtoToJson(const Proto& proto_output,
+                                std::string* json_output) {
   protobuf::util::JsonPrintOptions json_options;
   json_options.always_print_primitive_fields = true;
   auto status = protobuf::util::MessageToJsonString(proto_output, json_output,
@@ -539,7 +541,7 @@ Status ConvertProtoToJson(const Proto& proto_output, std::string* json_output) {
         "Could not convert proto to JSON string: ",
         absl::string_view(error_msg.data(), error_msg.length()));
   }
-  return Status::OK();
+  return absl::OkStatus();
 }
 
 }  // namespace
@@ -554,14 +556,14 @@ MemoryProfile ConvertXPlaneToMemoryProfile(const XPlane& host_plane,
   return memory_profile;
 }
 
-Status ConvertXSpaceToMemoryProfileJson(const XSpace& xspace,
-                                        std::string* json_output) {
+absl::Status ConvertXSpaceToMemoryProfileJson(const XSpace& xspace,
+                                              std::string* json_output) {
   if (const XPlane* host_plane =
           FindPlaneWithName(xspace, kHostThreadsPlaneName)) {
     MemoryProfile memory_profile = ConvertXPlaneToMemoryProfile(*host_plane);
     TF_RETURN_IF_ERROR(ConvertProtoToJson(memory_profile, json_output));
   }
-  return Status::OK();
+  return absl::OkStatus();
 }
 
 }  // namespace profiler

@@ -15,8 +15,13 @@ limitations under the License.
 
 #include "tensorflow/core/profiler/internal/tfprof_show_multi.h"
 
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -38,9 +43,9 @@ const MultiGraphNodeProto& TFMultiShow::Show(const string& prefix,
       absl::PrintF("%s%s", prefix, ret->formatted_str);
       fflush(stdout);
     } else if (opts.output_type == kOutput[2]) {
-      Status s = WriteStringToFile(Env::Default(),
-                                   opts.output_options.at(kFileOpts[0]),
-                                   prefix + ret->formatted_str);
+      absl::Status s = WriteStringToFile(Env::Default(),
+                                         opts.output_options.at(kFileOpts[0]),
+                                         prefix + ret->formatted_str);
       if (!s.ok()) {
         absl::FPrintF(stderr, "%s\n", s.ToString());
       }

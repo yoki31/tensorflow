@@ -13,6 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -21,13 +24,14 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/xla_helpers.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "tensorflow/compiler/xla/client/lib/arithmetic.h"
-#include "tensorflow/compiler/xla/client/lib/comparators.h"
-#include "tensorflow/compiler/xla/client/lib/constants.h"
-#include "tensorflow/compiler/xla/client/xla_builder.h"
-#include "tensorflow/compiler/xla/comparison_util.h"
-#include "tensorflow/compiler/xla/shape.h"
-#include "tensorflow/compiler/xla/shape_util.h"
+#include "xla/comparison_util.h"
+#include "xla/hlo/builder/lib/arithmetic.h"
+#include "xla/hlo/builder/lib/comparators.h"
+#include "xla/hlo/builder/lib/constants.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/shape.h"
+#include "xla/shape_util.h"
+#include "xla/xla_data.pb.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/ops_util.h"
 #include "tensorflow/core/framework/register_types.h"
@@ -108,8 +112,8 @@ class DynamicPartitionOp : public XlaOpKernel {
   }
 
   void Compile(XlaOpKernelContext* ctx) override {
-    xla::Shape data_shape = ctx->InputXlaShape(0).ConsumeValueOrDie();
-    xla::Shape partition_shape = ctx->InputXlaShape(1).ConsumeValueOrDie();
+    xla::Shape data_shape = ctx->InputXlaShape(0).value();
+    xla::Shape partition_shape = ctx->InputXlaShape(1).value();
     xla::XlaOp data = ctx->Input(0);
     xla::XlaOp partitions = ctx->Input(1);
     std::vector<int64_t> partitions_static;

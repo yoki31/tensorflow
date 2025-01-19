@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/tfrt/utils/host_context.h"
 
+#include <cstdint>
 #include <memory>
 
 #include "tensorflow/core/platform/logging.h"
@@ -33,7 +34,7 @@ const char* const kDefaultHostDeviceName =
 std::unique_ptr<HostContext> CreateSingleThreadedHostContext() {
   return std::make_unique<HostContext>(
       [](const tfrt::DecodedDiagnostic& diag) {
-        LOG(FATAL) << "Runtime error: " << diag.message << "\n";
+        LOG(FATAL) << "Runtime error: " << diag.message() << "\n";
       },
       tfrt::CreateMallocAllocator(), tfrt::CreateSingleThreadedWorkQueue(),
       kDefaultHostDeviceName);
@@ -43,7 +44,7 @@ std::unique_ptr<HostContext> CreateMultiThreadedHostContext(
     int64_t num_threads) {
   return std::make_unique<HostContext>(
       [](const tfrt::DecodedDiagnostic& diag) {
-        LOG(FATAL) << "Runtime error: " << diag.message << "\n";
+        LOG(FATAL) << "Runtime error: " << diag.message() << "\n";
       },
       tfrt::CreateMallocAllocator(),
       tfrt::CreateMultiThreadedWorkQueue(num_threads,

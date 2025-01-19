@@ -16,6 +16,8 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_IR_TF_OP_REGISTRY_H_
 #define TENSORFLOW_CORE_IR_TF_OP_REGISTRY_H_
 
+#include "mlir/IR/Dialect.h"  // from @llvm-project
+#include "mlir/IR/Operation.h"  // from @llvm-project
 #include "tensorflow/core/ir/interfaces.h"
 
 // Forward declaration of TensorFlow types.
@@ -29,7 +31,7 @@ class TensorFlowOpRegistryInterface : public TensorFlowRegistryInterfaceBase {
  public:
   // Create the interface model with a provided registry.
   TensorFlowOpRegistryInterface(Dialect *dialect,
-                                tensorflow::OpRegistry *registry)
+                                const tensorflow::OpRegistry *registry)
       : TensorFlowRegistryInterfaceBase(dialect), registry_(registry) {}
   // Create the interface model with the global registry.
   explicit TensorFlowOpRegistryInterface(Dialect *dialect);
@@ -37,9 +39,12 @@ class TensorFlowOpRegistryInterface : public TensorFlowRegistryInterfaceBase {
   // Returns true if the operation is stateful.
   bool isStateful(Operation *op) const override;
 
+  // Returns the current TensorFlow op registry.
+  const tensorflow::OpRegistry *GetRegistry() const { return registry_; }
+
  private:
   // The TensorFlow op registry instance.
-  tensorflow::OpRegistry *registry_;
+  const tensorflow::OpRegistry *registry_;
 };
 }  // namespace tfg
 }  // namespace mlir

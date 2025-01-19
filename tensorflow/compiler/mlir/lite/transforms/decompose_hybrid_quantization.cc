@@ -24,42 +24,32 @@ limitations under the License.
 // dense operations. Decomposition allows TFLite to be compiled to these
 // dialects, such as TOSA.
 
-#include "mlir/Dialect/Quant/QuantTypes.h"  // from @llvm-project
+#include <utility>
+
+#include "mlir/Dialect/Quant/IR/QuantTypes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/Pass/Pass.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
+#include "tensorflow/compiler/mlir/lite/transforms/passes.h"
 
 namespace mlir {
 namespace TFL {
 
 namespace {
 
+#define GEN_PASS_DEF_DECOMPOSEHYBRIDQUANTIZATIONPASS
+#include "tensorflow/compiler/mlir/lite/transforms/passes.h.inc"
+
 class DecomposeHybridQuantizationPass
-    : public PassWrapper<DecomposeHybridQuantizationPass,
-                         OperationPass<func::FuncOp>> {
+    : public impl::DecomposeHybridQuantizationPassBase<
+          DecomposeHybridQuantizationPass> {
  public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DecomposeHybridQuantizationPass)
-
-  DecomposeHybridQuantizationPass() = default;
-  DecomposeHybridQuantizationPass(const DecomposeHybridQuantizationPass &) {}
-
-  StringRef getArgument() const override {
-    return "tfl-decompose-hybrid-quantization";
-  }
-
-  StringRef getDescription() const override {
-    return "Decomposes (with explicit quantize/dequantize ops) selected math "
-           "operations which exist in the model with hybrid quantization "
-           "(some arguments/results left in floating point).";
-  }
-
+  explicit DecomposeHybridQuantizationPass() {}
   void runOnOperation() override;
-
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<TFL::TensorFlowLiteDialect>();
-  }
 };
 
 template <typename SrcOp>
@@ -73,20 +63,20 @@ class DequantizeConverter : public OpRewritePattern<SrcOp> {
     bool allTypesFp = true;
     bool allTypesQuantizedOrInt = true;
     for (auto operand : op->getOperands()) {
-      ShapedType type = operand.getType().template dyn_cast<ShapedType>();
+      ShapedType type = mlir::dyn_cast<ShapedType>(operand.getType());
       if (!type) continue;
-      allTypesFp &= !type.getElementType().isa<quant::QuantizedType>();
+      allTypesFp &= !mlir::isa<quant::QuantizedType>(type.getElementType());
       allTypesQuantizedOrInt &=
-          (type.getElementType().isa<quant::QuantizedType>() ||
-           type.getElementType().isa<IntegerType>());
+          (mlir::isa<quant::QuantizedType>(type.getElementType()) ||
+           mlir::isa<IntegerType>(type.getElementType()));
     }
 
     for (auto result : op->getResults()) {
-      ShapedType type = result.getType().template cast<ShapedType>();
-      allTypesFp &= !type.getElementType().isa<quant::QuantizedType>();
+      ShapedType type = mlir::cast<ShapedType>(result.getType());
+      allTypesFp &= !mlir::isa<quant::QuantizedType>(type.getElementType());
       allTypesQuantizedOrInt &=
-          (type.getElementType().isa<quant::QuantizedType>() ||
-           type.getElementType().isa<IntegerType>());
+          (mlir::isa<quant::QuantizedType>(type.getElementType()) ||
+           mlir::isa<IntegerType>(type.getElementType()));
     }
 
     // If all quantized or floating point then types are consistent.
@@ -152,7 +142,7 @@ void DecomposeHybridQuantizationPass::runOnOperation() {
                DequantizeConverter<TFL::DepthwiseConv2DOp>,
                DequantizeConverter<TFL::FullyConnectedOp>,
                DequantizeConverter<TFL::TransposeConvOp>>(ctx);
-  (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
+  (void)applyPatternsGreedily(func, std::move(patterns));
 }
 
 }  // namespace
@@ -161,8 +151,6 @@ std::unique_ptr<OperationPass<func::FuncOp>>
 CreateDecomposeHybridQuantizationPass() {
   return std::make_unique<DecomposeHybridQuantizationPass>();
 }
-
-static PassRegistration<DecomposeHybridQuantizationPass> pass;
 
 }  // namespace TFL
 }  // namespace mlir

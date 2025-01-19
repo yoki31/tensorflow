@@ -13,9 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <utility>
-
 #include "tensorflow/core/util/example_proto_fast_parsing.h"
+
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "tensorflow/core/example/example.pb.h"
 #include "tensorflow/core/example/feature.pb.h"
@@ -421,9 +423,9 @@ TEST(TestFastParseExample, Empty) {
   Result result;
   FastParseExampleConfig config;
   config.sparse.push_back({"test", DT_STRING});
-  Status status =
-      FastParseExample(config, gtl::ArraySlice<tstring>(),
-                       gtl::ArraySlice<tstring>(), nullptr, &result);
+  absl::Status status =
+      FastParseExample(config, absl::Span<const tstring>(),
+                       absl::Span<const tstring>(), nullptr, &result);
   EXPECT_TRUE(status.ok()) << status;
 }
 

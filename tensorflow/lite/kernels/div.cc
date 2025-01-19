@@ -15,8 +15,8 @@ limitations under the License.
 #include <stddef.h>
 #include <stdint.h>
 
-#include "tensorflow/lite/c/builtin_op_data.h"
-#include "tensorflow/lite/c/common.h"
+#include "tensorflow/lite/core/c/builtin_op_data.h"
+#include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/kernels/internal/compatibility.h"
 #include "tensorflow/lite/kernels/internal/optimized/cpu_check.h"
 #include "tensorflow/lite/kernels/internal/optimized/neon_check.h"
@@ -228,8 +228,9 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
 
 
   if (output->type == kTfLiteFloat32) {
-    // Div by zero seems ok in this case, just like in TF case infinities are
-    // returned. So we don't do a check at this point.
+    // Div by zero seems ok in this case, we don't do a check at this point.
+    // However, unlike in TF where infinities are returned, here we return an
+    // activation min/max value if any or std::numeric_limits<float>::min/max.
     EvalDiv<kernel_type>(context, node, params, data, input1, input2, output);
   } else if (output->type == kTfLiteInt32) {
     CheckNonZero<int32_t>(context, input2);
@@ -253,20 +254,50 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
 }  // namespace div
 
 TfLiteRegistration* Register_DIV_REF() {
-  static TfLiteRegistration r = {div::Init, div::Free, div::Prepare,
-                                 div::Eval<div::kReference>};
+  static TfLiteRegistration r = {
+      div::Init,
+      div::Free,
+      div::Prepare,
+      div::Eval<div::kReference>,
+      /*profiling_string=*/nullptr,
+      /*builtin_code=*/0,
+      /*custom_name=*/nullptr,
+      /*version=*/0,
+      /*registration_external=*/nullptr,
+      /*async_kernel=*/nullptr,
+      kTfLiteInplaceOpInput0Shared | kTfLiteInplaceOpInput1Shared};
   return &r;
 }
 
 TfLiteRegistration* Register_DIV_GENERIC_OPT() {
-  static TfLiteRegistration r = {div::Init, div::Free, div::Prepare,
-                                 div::Eval<div::kGenericOptimized>};
+  static TfLiteRegistration r = {
+      div::Init,
+      div::Free,
+      div::Prepare,
+      div::Eval<div::kGenericOptimized>,
+      /*profiling_string=*/nullptr,
+      /*builtin_code=*/0,
+      /*custom_name=*/nullptr,
+      /*version=*/0,
+      /*registration_external=*/nullptr,
+      /*async_kernel=*/nullptr,
+      kTfLiteInplaceOpInput0Shared | kTfLiteInplaceOpInput1Shared};
   return &r;
 }
 
 TfLiteRegistration* Register_DIV_NEON_OPT() {
-  static TfLiteRegistration r = {div::Init, div::Free, div::Prepare,
-                                 div::Eval<div::kNeonOptimized>};
+  static TfLiteRegistration r = {
+      div::Init,
+      div::Free,
+      div::Prepare,
+      div::Eval<div::kNeonOptimized>,
+      /*profiling_string=*/nullptr,
+      /*builtin_code=*/0,
+      /*custom_name=*/nullptr,
+      /*version=*/0,
+      /*registration_external=*/nullptr,
+      /*async_kernel=*/nullptr,
+      kTfLiteInplaceOpInput0Shared | kTfLiteInplaceOpInput1Shared};
   return &r;
 }
 

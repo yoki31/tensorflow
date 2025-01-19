@@ -24,12 +24,12 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/eigen3/unsupported/Eigen/CXX11/FixedPoint"
 #include "tensorflow/cc/framework/scope.h"
 #include "tensorflow/cc/ops/function_ops.h"
 #include "tensorflow/cc/ops/math_ops.h"
 #include "tensorflow/compiler/tf2tensorrt/convert/convert_graph.h"
 #include "tensorflow/compiler/tf2tensorrt/utils/trt_lru_cache.h"
+#include "xla/tsl/framework/fixedpoint/FixedPoint.h"
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/process_function_library_runtime.h"
@@ -77,7 +77,7 @@ class TRTEngineOpTestBase : public OpsTestBase {
     Scope s = Scope::NewRootScope();
     auto feed = ops::_Arg(s.WithOpName("TensorRTInputPH_0"), dtype, 0);
     auto add = ops::Add(s.WithOpName("add"), feed, feed);
-    ops::_Retval(s.WithOpName("TensorRTOutputPH_0"), add, 0);
+    ops::_Retval give_me_a_name(s.WithOpName("TensorRTOutputPH_0"), add, 0);
 
     // Serialize the graph. TRTEngineOp will convert it using dynamic mode.
     GraphDef graph_def;
@@ -99,9 +99,12 @@ class TRTEngineOpTestBase : public OpsTestBase {
       params.trt_logger_name = "DefaultLogger";
 
       TrtShapeOptimizationProfile profile;
-      TensorShape my_shape;
+      // We set the input mask to true (no resource inputs)
+      std::vector<bool> input_mask = {true};
+      profile.SetInputMask(input_mask);
       // We set profile 0 to be incompatible with the input used in the test.
       // This way we ensure that profile selection is tested.
+      TensorShape my_shape;
       TF_CHECK_OK(
           TensorShapeUtils::MakeShape(std::vector<int32>{4, 2}, &my_shape));
       profile.AddShape({my_shape, {}});
@@ -277,7 +280,7 @@ TEST_F(TRTEngineOpTestBase, AllowBuildAtRuntime) {
   EXPECT_EQ(1, cache->size());
   ASSERT_EQ(1, cache->count({input_shape}));
   EngineContext* ectx = cache->at({input_shape}).get();
-  EXPECT_EQ(ectx->cuda_engine, nullptr);
+  EXPECT_EQ(ectx->GetCudaEngine(), nullptr);
 }
 
 TEST_P(TRTEngineOpTestWithParam, ExplicitBatch) {
@@ -304,7 +307,7 @@ TEST_P(TRTEngineOpTestWithParam, ExplicitBatch) {
   EXPECT_EQ(1, cache->size());
   ASSERT_EQ(1, cache->count({input_shape}));
   EngineContext* ectx = cache->at({input_shape}).get();
-  EXPECT_NE(ectx->cuda_engine, nullptr);
+  EXPECT_NE(ectx->GetCudaEngine(), nullptr);
 }
 
 TEST_P(TRTEngineOpTestWithParam, DynamicShapes) {
@@ -334,7 +337,7 @@ TEST_P(TRTEngineOpTestWithParam, DynamicShapes) {
   EXPECT_EQ(1, cache->size());
   ASSERT_EQ(1, cache->count({input_shape}));
   EngineContext* ectx = cache->at({input_shape}).get();
-  EXPECT_NE(ectx->cuda_engine, nullptr);
+  EXPECT_NE(ectx->GetCudaEngine(), nullptr);
 
   // Execute the op with an incompatible shape.
   ResetInputs();

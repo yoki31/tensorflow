@@ -13,9 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <memory>
+
+#include "mlir/Analysis/AliasAnalysis.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
-#include "mlir/Dialect/SCF/SCF.h"  // from @llvm-project
-#include "mlir/Dialect/SCF/Transforms.h"  // from @llvm-project
+#include "mlir/Dialect/SCF/IR/SCF.h"  // from @llvm-project
+#include "mlir/Dialect/SCF/Transforms/Transforms.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tools/kernel_gen/transforms/passes.h"
 
 namespace mlir {
@@ -23,14 +26,18 @@ namespace kernel_gen {
 namespace transforms {
 namespace {
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DEF_FUSEINNERPARALLELLOOPSPASS
 #include "tensorflow/compiler/mlir/tools/kernel_gen/transforms/kernel_gen_passes.h.inc"
 
 struct FuseInnerParallelLoopsPass
-    : FuseInnerParallelLoopsPassBase<FuseInnerParallelLoopsPass> {
+    : impl::FuseInnerParallelLoopsPassBase<FuseInnerParallelLoopsPass> {
   void runOnOperation() override {
-    getOperation().walk([](mlir::scf::ParallelOp op) {
-      mlir::scf::naivelyFuseParallelOps(op.getRegion());
+    auto &alias_analysis = getAnalysis<AliasAnalysis>();
+    auto may_alias = [&](Value val1, Value val2) -> bool {
+      return !alias_analysis.alias(val1, val2).isNo();
+    };
+    getOperation().walk([&](mlir::scf::ParallelOp op) {
+      mlir::scf::naivelyFuseParallelOps(op.getRegion(), may_alias);
     });
   }
 };

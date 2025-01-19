@@ -74,12 +74,12 @@ struct VarLenFeature {
 // GetSparseTensorShape can be used to calculate the final shapes and
 // CopyIntoSparseTensor can be used to copy from the temporary vector
 // into the final allocated tensors.
-Status SingleExampleProtoToTensors(
-    const Example& example, const string& name, const int batch_index,
+absl::Status SingleExampleProtoToTensors(
+    const Example& example, const string& name, int batch_index,
     const std::vector<FixedLenFeature>& fixed_len_features,
     const std::vector<VarLenFeature>& var_len_features,
-    std::vector<Tensor*>* dense_values,
-    std::vector<std::vector<Tensor>>* sparse_values_temporary_vector);
+    std::vector<Tensor*>* output_dense_values_tensor,
+    std::vector<std::vector<Tensor>>* output_sparse_values_tmp);
 
 // The shape of the indices and values tensors associated with a SparseTensor
 // are dependent on the contents of the batch.
@@ -92,10 +92,10 @@ struct VarLenFeatureBatchShapes {
 // Get the shape of the sparse values and indices tensors for the batch,
 // given how many of the tensors in the temporary sparse values vector
 // are actually filled.
-Status GetSparseTensorShapes(const VarLenFeature& var_len_feature,
-                             const std::vector<Tensor>& sparse_values_tmp,
-                             const int batch_size,
-                             VarLenFeatureBatchShapes* output_shapes);
+absl::Status GetSparseTensorShapes(const VarLenFeature& var_len_feature,
+                                   const std::vector<Tensor>& sparse_values_tmp,
+                                   int batch_size,
+                                   VarLenFeatureBatchShapes* output_shapes);
 
 // A method to convert a batch of tensorflow::Example protos into output
 // tensors. This method is useful if there already is a batch of deserialized
@@ -107,7 +107,7 @@ Status GetSparseTensorShapes(const VarLenFeature& var_len_feature,
 //
 // Note that unlike SingleExampleProtoToTensors, output tensors are
 // allocated using a provided Allocator within this method.
-Status BatchExampleProtoToTensors(
+absl::Status BatchExampleProtoToTensors(
     const std::vector<const Example*>& examples,
     const std::vector<string>& names,
     const std::vector<FixedLenFeature>& fixed_len_features,
@@ -119,19 +119,19 @@ Status BatchExampleProtoToTensors(
 
 // Check that the given dtype is one that is compatible with
 // tensorflow::Example protocol buffer feature values.
-Status CheckValidType(const DataType& dtype);
+absl::Status CheckValidType(const DataType& dtype);
 
 // Check that the provided Feature proto message's oneof value
 // matches that of the provided dtype.
-Status CheckTypesMatch(const Feature& feature, const DataType& dtype,
-                       bool* match);
+absl::Status CheckTypesMatch(const Feature& feature, const DataType& dtype,
+                             bool* match);
 
 // For a single Example, copy a dense feature value into an output
 // dense value tensor Out at the provided out_index offset.
-Status FeatureDenseCopy(const std::size_t out_index, const string& name,
-                        const string& key, const DataType& dtype,
-                        const TensorShape& shape, const Feature& feature,
-                        Tensor* out);
+absl::Status FeatureDenseCopy(std::size_t out_index, const string& name,
+                              const string& key, const DataType& dtype,
+                              const TensorShape& shape, const Feature& feature,
+                              Tensor* out);
 
 // Copy the value a provided Tensor into an output dense_value tensor Out
 // at the provided out_index offset.
@@ -140,30 +140,29 @@ void RowDenseCopy(const std::size_t& out_index, const DataType& dtype,
 
 // For a single Example, and given sparse feature return a temporary output
 // Tensor suitable for being collected in the temporary sparse value vector.
-Tensor FeatureSparseCopy(const std::size_t batch, const string& key,
+Tensor FeatureSparseCopy(std::size_t batch, const string& key,
                          const DataType& dtype, const Feature& feature);
 
 // Copy a temporary Tensor into the final sparse indices and values
 // tensor at a given batch index and element offset. This method
 // assumes that the indices/values Tensors have been properly allocated
 // for the batch.
-int64_t CopyIntoSparseTensor(const Tensor& in, const int batch,
-                             const int64_t offset, Tensor* indices,
-                             Tensor* values);
+int64_t CopyIntoSparseTensor(const Tensor& in, int batch, int64_t offset,
+                             Tensor* indices, Tensor* values);
 
 // Check that each dense_shape has known rank and inner dimensions; and
 // update variable_length (whether the outer dimension is None) and
 // elements_per_stride for each denes_shape.
-Status GetDenseShapes(const std::vector<PartialTensorShape>& dense_shapes,
-                      std::vector<bool>* variable_length,
-                      std::vector<std::size_t>* elements_per_stride);
+absl::Status GetDenseShapes(const std::vector<PartialTensorShape>& dense_shapes,
+                            std::vector<bool>* variable_length,
+                            std::vector<std::size_t>* elements_per_stride);
 
 // Parses the attributes passed to ParseExample.
 // REQUIRES: Init must be called after construction.
 struct ParseExampleAttrs {
  public:
   template <typename ContextType>
-  Status Init(ContextType* ctx, int op_version = 1) {
+  absl::Status Init(ContextType* ctx, int op_version = 1) {
     TF_RETURN_IF_ERROR(ctx->GetAttr("sparse_types", &sparse_types));
     TF_RETURN_IF_ERROR(ctx->GetAttr("Tdense", &dense_types));
     TF_RETURN_IF_ERROR(ctx->GetAttr("dense_shapes", &dense_shapes));
@@ -199,7 +198,8 @@ struct ParseExampleAttrs {
   std::vector<std::size_t> elements_per_stride;
 
  private:
-  Status FinishInit(int op_version);  // for context-independent parts of Init.
+  absl::Status FinishInit(
+      int op_version);  // for context-independent parts of Init.
 };
 
 // Parses the attributes passed to ParseSingleExample.
@@ -207,7 +207,7 @@ struct ParseExampleAttrs {
 struct ParseSingleExampleAttrs {
  public:
   template <typename ContextType>
-  Status Init(ContextType* ctx) {
+  absl::Status Init(ContextType* ctx) {
     TF_RETURN_IF_ERROR(ctx->GetAttr("sparse_keys", &sparse_keys));
     TF_RETURN_IF_ERROR(ctx->GetAttr("sparse_types", &sparse_types));
     TF_RETURN_IF_ERROR(ctx->GetAttr("dense_keys", &dense_keys));
@@ -236,7 +236,7 @@ struct ParseSingleExampleAttrs {
   std::vector<std::size_t> elements_per_stride;
 
  private:
-  Status FinishInit();  // for context-independent parts of Init.
+  absl::Status FinishInit();  // for context-independent parts of Init.
 };
 
 // Parses the attributes passed to ParseSequenceExample.
@@ -244,7 +244,7 @@ struct ParseSingleExampleAttrs {
 struct ParseSequenceExampleAttrs {
  public:
   template <typename ContextType>
-  Status Init(ContextType* ctx, int op_version = 1) {
+  absl::Status Init(ContextType* ctx, int op_version = 1) {
     switch (op_version) {
       case 1: {
         std::vector<string> missing_empty_vector;
@@ -319,7 +319,8 @@ struct ParseSequenceExampleAttrs {
   std::vector<DataType> feature_list_ragged_split_types;
 
  private:
-  Status FinishInit(int op_version);  // for context-independent parts of Init.
+  absl::Status FinishInit(
+      int op_version);  // for context-independent parts of Init.
 };
 
 // Parses the attributes passed to ParseSingleSequenceExample.
@@ -327,7 +328,7 @@ struct ParseSequenceExampleAttrs {
 struct ParseSingleSequenceExampleAttrs {
  public:
   template <typename ContextType>
-  Status Init(ContextType* ctx) {
+  absl::Status Init(ContextType* ctx) {
     TF_RETURN_IF_ERROR(
         ctx->GetAttr("context_sparse_types", &context_sparse_types));
     TF_RETURN_IF_ERROR(ctx->GetAttr("Ncontext_dense", &num_context_dense));
@@ -360,7 +361,7 @@ struct ParseSingleSequenceExampleAttrs {
   std::vector<TensorShape> feature_list_dense_shapes;
 
  private:
-  Status FinishInit();  // for context-independent parts of Init.
+  absl::Status FinishInit();  // for context-independent parts of Init.
 };
 
 }  // namespace tensorflow

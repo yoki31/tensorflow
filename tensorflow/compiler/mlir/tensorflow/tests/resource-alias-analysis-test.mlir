@@ -2,7 +2,7 @@
 
 // Test 2 resources that do not alias.
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 // CHECK-LABEL: func @non_aliasing_reads_writes
 // expected-remark@below {{Region #0, Arg #0, ID 1 : 1}}
 // expected-remark@below {{Region #0, Arg #1, ID 2 : 2}}
@@ -32,7 +32,7 @@ func.func @non_aliasing_reads_writes(
 // -----
 // Tests aliasing of the two resource handles that refer to the same variable.
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 // CHECK-LABEL: func @aliasing_reads_writes
 func.func @aliasing_reads_writes(%arg0: tensor<32xf32>) -> () {
   tf_executor.graph {
@@ -58,9 +58,35 @@ func.func @aliasing_reads_writes(%arg0: tensor<32xf32>) -> () {
 }
 
 // -----
+// Tests handling of Cast, Identity, and IdentityN
+
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
+// CHECK-LABEL: func @aliasing_identities
+func.func @aliasing_identities(%arg0: tensor<32xf32>) -> () {
+  tf_executor.graph {
+    // CHECK: tf_executor.island
+    %island = tf_executor.island {
+      // expected-remark@below {{Result #0, ID 0 : 0, 1, 2, 3, 4}}
+      %vh0 = "tf.VarHandleOp"() {container = "c", shared_name = "v0"} : () -> !tf_res
+      // expected-remark@below {{Result #0, ID 1 : 0, 1, 2, 3, 4}}
+      %vh1 = "tf.VarHandleOp"() {container = "c", shared_name = "v0"} : () -> !tf_res
+      // expected-remark@below {{Result #0, ID 2 : 0, 1, 2, 3, 4}}
+      %vh1_id1 = "tf.Identity"(%vh1) : (!tf_res) -> !tf_res
+      // expected-remark@below {{Result #0, ID 3 : 0, 1, 2, 3, 4}}
+      %vh1_id2:2 = "tf.IdentityN"(%vh1, %arg0) : (!tf_res, tensor<32xf32>) -> (!tf_res, tensor<32xf32>)
+      // expected-remark@below {{Result #0, ID 4 : 0, 1, 2, 3, 4}}
+      %vh1_cast = "tf.Cast"(%vh1) : (!tf_res) -> (!tf_res)
+      tf_executor.yield
+    }
+    tf_executor.fetch %island : !tf_executor.control
+  }
+  func.return
+}
+
+// -----
 // Test an unknown op that has a resource result is marked unknown
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 // CHECK-LABEL: func @unknown_resource_op
 func.func @unknown_resource_op(%arg0: tensor<32xf32>) -> () {
     // expected-remark@below {{Result #0, ID 0 : Unknown}}
@@ -69,7 +95,7 @@ func.func @unknown_resource_op(%arg0: tensor<32xf32>) -> () {
 
 // -----
 // Test aliasing through TPUReplicatedInput
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 // CHECK-LABEL: func @aliasing_tpu_replicated_input
 func.func @aliasing_tpu_replicated_input(%arg0: tensor<32xf32>) -> () {
   tf_executor.graph {
@@ -93,7 +119,7 @@ func.func @aliasing_tpu_replicated_input(%arg0: tensor<32xf32>) -> () {
 // -----
 // Test aliasing through IfOp
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @if_op_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 4 : 1, 4}}
@@ -132,7 +158,7 @@ func.func @if_else(%arg0: !tf_res, %arg1: !tf_res) -> (!tf_res, !tf_res, !tf_res
 // -----
 // Test aliasing through CaseOp
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<i32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<i32>>>
 
 // CHECK-LABEL: func @case_op_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 4 : 1, 4}}
@@ -177,7 +203,7 @@ func.func @case_branch2(%arg0: !tf_res, %arg1: !tf_res) -> (!tf_res, !tf_res, !t
 
 // -----
 // Test aliasing through WhileOp
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @while_op_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 4 : 1, 4}}
@@ -219,7 +245,7 @@ func.func @while_cond(%arg0: !tf_res, %arg1: !tf_res, %arg2: !tf_res) -> tensor<
 
 // -----
 // Test alias propagation through calls.
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 // CHECK-LABEL: func @aliasing_through_calls
 func.func @aliasing_through_calls(%arg0: tensor<32xf32>) -> () {
   // expected-remark@below {{Result #0, ID 0 : 0, 1, 2, 3}}
@@ -242,7 +268,7 @@ func.func @passthru(%arg0: !tf_res) -> (!tf_res, !tf_res) {
 // -----
 // Test aliasing through IfRegion
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<i1>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<i1>>>
 
 // CHECK-LABEL: func @if_region_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 7 : 1, 4, 6, 7}}
@@ -271,7 +297,7 @@ func.func @if_region_aliasing(%arg0: !tf_res, %arg1: !tf_res) {
 // -----
 // Test aliasing through CaseRegion
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<i32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<i32>>>
 
 // CHECK-LABEL: func @case_region_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 7 : 1, 4, 6, 7}}
@@ -301,7 +327,7 @@ func.func @case_region_aliasing(%arg0: !tf_res, %arg1: !tf_res) {
 
 // -----
 // Test aliasing through WhileRegion
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @while_region_aliasing
 // expected-remark@below {{Region #0, Arg #0, ID 11 : 1, 8, 11}}
@@ -334,7 +360,7 @@ func.func @while_region_aliasing(%arg0: !tf_res, %arg1: !tf_res, %arg2: !tf_res)
 
 // -----
 // Test aliasing through calls
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @aliasing_through_calls
 func.func @aliasing_through_calls(%arg0: tensor<32xf32>) -> () {
@@ -355,7 +381,7 @@ func.func @passthru(%arg0: !tf_res) -> (!tf_res, !tf_res) {
 
 // -----
 // Test aliasing through tf_device.launch
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @aliasing_through_launch
 func.func @aliasing_through_launch(%arg0: tensor<32xf32>) {
@@ -371,7 +397,7 @@ func.func @aliasing_through_launch(%arg0: tensor<32xf32>) {
 
 // -----
 // Test aliasing through tf_device.cluster
-!tf_res = type tensor<*x!tf_type.resource<tensor<32xf32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<32xf32>>>
 
 // CHECK-LABEL: func @aliasing_through_cluster
 func.func @aliasing_through_cluster(%arg0: tensor<32xf32>) {
@@ -400,7 +426,7 @@ func.func @unique_resource_allocation(%arg0: tensor<i32>) {
 
 // -----
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<f32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<f32>>>
 
 // Tests that ops with different known resource types get different resource IDs
 // assigned, even if resource instances are unknown.
@@ -414,7 +440,7 @@ func.func @known_different_resource_types_unknown_instances(%arg0: tensor<i32>) 
 
 // -----
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<f32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<f32>>>
 
 // Tests that ops with same known resource type get same resource ID assigned
 // (not unknown ID) if resource instances are unknown.
@@ -428,7 +454,7 @@ func.func @known_same_resource_types_unknown_instances(%arg0: tensor<i32>) {
 
 // -----
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<f32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<f32>>>
 
 // Tests that an allocated resource is correctly propagated to island and graph
 // results.
@@ -449,7 +475,7 @@ func.func @allocated_resource_propagation_island_graph() {
 
 // -----
 
-!tf_res = type tensor<*x!tf_type.resource<tensor<f32>>>
+!tf_res = tensor<*x!tf_type.resource<tensor<f32>>>
 
 // Tests that aliasing and non-aliasing values are correctly identified through
 // multiple islands (`%iter_handle1`, `%iter_handle2`, `%island1#0` and

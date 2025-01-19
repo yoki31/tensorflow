@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/platform/status.h"
+#include "tsl/platform/errors.h"
 
 // Use a namespace when registering by prepending the
 // package's name to the op’s name and separate with a '>'.
@@ -52,7 +54,7 @@ REGISTER_OP("Examples>MultiplexSparse")
       c->set_output(0, c->Matrix(num_rows, dense_rank));
       c->set_output(1, c->Vector(num_rows));
       c->set_output(2, c->Vector(dense_rank));
-      return tensorflow::Status::OK();
+      return ::tensorflow::OkStatus();
     })
     .Doc(R"doc(
 Return elements chosen from `a` or `b` depending on `cond`.

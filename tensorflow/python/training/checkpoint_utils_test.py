@@ -14,13 +14,14 @@
 # ==============================================================================
 """Tests for checkpoints tools."""
 
-import pathlib
 import os
+import pathlib
 import time
 
 import numpy as np
 
 from tensorflow.core.protobuf import config_pb2
+from tensorflow.python.checkpoint import checkpoint as trackable_utils
 from tensorflow.python.client import session as session_lib
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors_impl
@@ -35,7 +36,6 @@ from tensorflow.python.platform import gfile
 from tensorflow.python.platform import test
 from tensorflow.python.training import checkpoint_utils
 from tensorflow.python.training import saver as saver_lib
-from tensorflow.python.training.tracking import util as trackable_utils
 
 
 def _create_checkpoints(sess, checkpoint_dir):
@@ -131,7 +131,6 @@ class CheckpointsTest(test.TestCase):
         checkpoint_utils.list_variables(checkpoint_dir),
         [("useful_scope/var4", [9, 9]), ("var1", [1, 10]), ("var2", [10, 10]),
          ("var3", [100, 100])])
-
 
   def testInitFromCheckpoint(self):
     checkpoint_dir = self.get_temp_dir()
@@ -315,7 +314,7 @@ class CheckpointsTest(test.TestCase):
         self.assertAllEqual(my1_values, v1)
         my2_values = session.run(my2_var_list)
         # Verify we created different number of partitions.
-        self.assertNotEquals(len(my2_values), len(v1))
+        self.assertNotEqual(len(my2_values), len(v1))
         # Verify the values were correctly initialized inspite of different
         # partitions.
         full_my2_values = np.concatenate(my2_values, axis=0)

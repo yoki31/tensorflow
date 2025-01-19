@@ -43,8 +43,7 @@ std::ostream& operator<<(std::ostream& os,
 
 std::ostream& operator<<(std::ostream& os, const nvinfer1::IAlgorithm& alg) {
   const nvinfer1::IAlgorithmVariant& variant = alg.getAlgorithmVariant();
-  os << "Algorithm("
-     << "variant.implementation=" << variant.getImplementation()
+  os << "Algorithm(" << "variant.implementation=" << variant.getImplementation()
      << ",variant.tactic=" << variant.getTactic()
      << ",timingMSec=" << alg.getTimingMSec()
      << ",workspaceSize=" << alg.getWorkspaceSize() << ")";
@@ -135,7 +134,7 @@ bool AlgorithmSelectorImpl::AllowShuffleAlgorithm(
 
 bool AlgorithmSelectorImpl::IsAlgorithmSelectorRequired() const {
   // If we are in turing for TensorRT 7.2, we need the  selector for shuffle and
-  // avoiding specfic Turing tactics.
+  // avoiding specific Turing tactics.
   if (IsTrtVersionGE({7, 2, 0, 0}) && !IsTrtVersionGE({8, 0, 0, 0})) {
     return true;
   }
@@ -172,7 +171,7 @@ TftrtAlgorithmSelector::TftrtAlgorithmSelector()
     : fixed_algorithm_idx_(GetFixedAlgorithmID()),
       selector_(AlgorithmSelectorImpl::CompileTimeTRTVersion()) {}
 
-absl::optional<int64_t> TftrtAlgorithmSelector::GetFixedAlgorithmID() {
+std::optional<int64_t> TftrtAlgorithmSelector::GetFixedAlgorithmID() {
   int64_t trt_algorithm_idx = 0;
   constexpr auto null_idx =
       std::numeric_limits<decltype(trt_algorithm_idx)>::min();
@@ -181,12 +180,12 @@ absl::optional<int64_t> TftrtAlgorithmSelector::GetFixedAlgorithmID() {
                                                   &trt_algorithm_idx);
   if (!status.ok()) {
     LOG(ERROR) << status;
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (trt_algorithm_idx != null_idx) {
     return std::max(static_cast<int32_t>(trt_algorithm_idx), 0);
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 bool TftrtAlgorithmSelector::AlgorithmPolicy(

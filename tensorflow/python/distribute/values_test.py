@@ -36,6 +36,7 @@ from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import tensor
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
@@ -438,7 +439,11 @@ def _make_replica_local(method, strategy=None):
   return v, replica_local
 
 
-class SyncOnReadVariableTest(test.TestCase, parameterized.TestCase):
+class DistributedVariableTest(test.TestCase, parameterized.TestCase):
+
+  def tearDown(self):
+    super().tearDown()
+    context._reset_context()
 
   def _assign_replica_local(self, v, new):
     for var, n in zip(v, new):
@@ -498,12 +503,12 @@ class SyncOnReadVariableTest(test.TestCase, parameterized.TestCase):
       _, replica_local = _make_replica_local(
           variable_scope.VariableAggregation.SUM, distribution)
       converted = ops.convert_to_tensor(replica_local, as_ref=False)
-      self.assertIsInstance(converted, ops.Tensor)
+      self.assertIsInstance(converted, tensor.Tensor)
       self.assertEqual(converted.dtype, replica_local.dtype)
 
       converted = ops.convert_to_tensor(replica_local, as_ref=True)
       # Resources variable are converted to tensors as well when as_ref is True.
-      self.assertIsInstance(converted, ops.Tensor)
+      self.assertIsInstance(converted, tensor.Tensor)
       self.assertEqual(converted.dtype, replica_local.dtype)
 
   @combinations.generate(combinations.combine(
@@ -517,7 +522,7 @@ class SyncOnReadVariableTest(test.TestCase, parameterized.TestCase):
     value_list, replica_local = _make_replica_local(
         variable_scope.VariableAggregation.ONLY_FIRST_REPLICA, distribution)
 
-    self.assertIsInstance(replica_local.value(), ops.Tensor)
+    self.assertIsInstance(replica_local.value(), tensor.Tensor)
     self.assertEqual(self.evaluate(replica_local.value()),
                      self.evaluate(value_list[0].value()))
 
@@ -547,6 +552,30 @@ class SyncOnReadVariableTest(test.TestCase, parameterized.TestCase):
     distribution.run(replica_fn)
     sum_v = v1 + v2
     self.assertEqual(sum_v, 6.0)
+
+  @combinations.generate(
+      combinations.combine(
+          distribution=[
+              strategy_combinations.tpu_strategy_packed_var,
+          ],
+          mode=["eager"]))
+  def testValueInFunctionCrossReplicaContext(self, distribution):
+    with distribution.scope():
+      v1 = variables_lib.Variable(
+          0.0,
+          aggregation=variables_lib.VariableAggregation.NONE,
+          synchronization=variables_lib.VariableSynchronization.ON_WRITE)
+
+    @def_function.function
+    def assign_fn():
+      v1.assign(1.0)
+
+    assign_fn()
+    self.assertEqual(v1, 1.0)
+
+    # Make sure the function graph has composite variable as inputs.
+    graph_def = assign_fn.get_concrete_function().graph.as_graph_def()
+    self.assertRegex(str(graph_def), "device:COMPOSITE:0")
 
   @combinations.generate(
       combinations.combine(

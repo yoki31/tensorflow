@@ -16,7 +16,10 @@ limitations under the License.
 #ifndef TENSORFLOW_DTENSOR_MLIR_EXPANSIONS_META_SPMD_EXPANDER_H_
 #define TENSORFLOW_DTENSOR_MLIR_EXPANSIONS_META_SPMD_EXPANDER_H_
 
+#include "llvm/ADT/DenseMap.h"
+#include "mlir/IR/Operation.h"  // from @llvm-project
 #include "tensorflow/dtensor/cc/dstatus.h"
+#include "tensorflow/dtensor/cc/tensor_layout.h"
 #include "tensorflow/dtensor/mlir/shape_utils.h"
 #include "tensorflow/dtensor/mlir/spmd_expander.h"
 
@@ -104,21 +107,6 @@ class ReshapeSPMDExpander : public SPMDExpanderBase {
 class TransposeSPMDExpander : public SPMDExpanderBase {
  private:
   StatusOr<mlir::Operation*> ExpandOp(mlir::Operation* op) override;
-
-  StatusOr<llvm::DenseMap<int, Layout>> ComputeLayoutForward(
-      mlir::Operation* op,
-      const llvm::DenseMap<int, Layout>& input_layouts) override;
-
-  StatusOr<llvm::DenseMap<int, Layout>> ComputeLayoutBackward(
-      mlir::Operation* op,
-      const llvm::DenseMap<int, Layout>& output_layouts) override;
-};
-
-class InvertPermutationSPMDExpander : public SPMDExpanderBase {
- public:
-  StatusOr<mlir::Operation*> ExpandOp(mlir::Operation* op) override {
-    return InferSPMDExpandedLocalShape(op);
-  }
 
   StatusOr<llvm::DenseMap<int, Layout>> ComputeLayoutForward(
       mlir::Operation* op,

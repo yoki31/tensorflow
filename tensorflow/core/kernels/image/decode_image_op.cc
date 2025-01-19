@@ -15,28 +15,34 @@ limitations under the License.
 
 // See docs in ../ops/image_ops.cc
 
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <memory>
-
-#include "tensorflow/core/lib/gtl/cleanup.h"
 
 #define EIGEN_USE_THREADS
 
-#include "absl/strings/escaping.h"
+#include "absl/strings/match.h"
+#include "xla/tsl/util/byte_swap_array.h"
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/framework/register_types.h"
+#include "tensorflow/core/framework/op_requires.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gif/gif_io.h"
+#include "tensorflow/core/lib/gtl/cleanup.h"
 #include "tensorflow/core/lib/jpeg/jpeg_mem.h"
 #include "tensorflow/core/lib/png/png_io.h"
-#include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/platform/byte_order.h"
+#include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/util/tensor_bundle/byte_swap.h"
+#include "tensorflow/core/platform/stringpiece.h"
+#include "tensorflow/core/platform/tstring.h"
 
 namespace tensorflow {
 namespace {
@@ -61,7 +67,7 @@ enum FileFormat {
 };
 
 // Classify the contents of a file based on starting bytes (the magic number).
-FileFormat ClassifyFileFormat(StringPiece data) {
+FileFormat ClassifyFileFormat(absl::string_view data) {
   if (absl::StartsWith(data, kJpegMagicBytes)) return kJpgFormat;
   if (absl::StartsWith(data, kPngMagicBytes)) return kPngFormat;
   if (absl::StartsWith(data, kGifMagicBytes)) return kGifFormat;
@@ -191,7 +197,7 @@ class DecodeImageV2Op : public OpKernel {
         context, TensorShapeUtils::IsScalar(contents.shape()),
         errors::InvalidArgument("`contents` must be scalar but got shape",
                                 contents.shape().DebugString()));
-    const StringPiece input = contents.scalar<tstring>()();
+    const absl::string_view input = contents.scalar<tstring>()();
     OP_REQUIRES(context, !input.empty(),
                 errors::InvalidArgument("Input is empty."));
     OP_REQUIRES(context, input.size() <= std::numeric_limits<int>::max(),
@@ -220,7 +226,7 @@ class DecodeImageV2Op : public OpKernel {
     }
   }
 
-  void DecodeJpegV2(OpKernelContext* context, StringPiece input) {
+  void DecodeJpegV2(OpKernelContext* context, absl::string_view input) {
     OP_REQUIRES(context, channels_ == 0 || channels_ == 1 || channels_ == 3,
                 errors::InvalidArgument("JPEG does not support 4 channels"));
 
@@ -267,7 +273,7 @@ class DecodeImageV2Op : public OpKernel {
         input.data(), input.size(), flags, nullptr /* nwarn */,
         [&](int width, int height, int channels) -> uint8* {
           buffer_size = height * width * channels;
-          Status status;
+          absl::Status status;
           // By the existing API, we support decoding JPEG with `DecodeGif`
           // op. We need to make sure to return 4-D shapes when using
           // `DecodeGif`.
@@ -321,7 +327,7 @@ class DecodeImageV2Op : public OpKernel {
     }
   }
 
-  void DecodePngV2(OpKernelContext* context, StringPiece input) {
+  void DecodePngV2(OpKernelContext* context, absl::string_view input) {
     int channel_bits = (data_type_ == DataType::DT_UINT8) ? 8 : 16;
     png::DecodeContext decode;
     OP_REQUIRES(
@@ -333,9 +339,8 @@ class DecodeImageV2Op : public OpKernel {
     // `png::CommonFreeDecode()` before an `OP_REQUIRES` because if
     // `OP_REQUIRES` constraint is satisfied then the data would be freed
     // prematurely. Instead, let's use a `Cleanup` object.
-    auto cleanup = gtl::MakeCleanup([&decode]() {
-      png::CommonFreeDecode(&decode);
-    });
+    auto cleanup =
+        gtl::MakeCleanup([&decode]() { png::CommonFreeDecode(&decode); });
 
     // Verify that width and height are not too large:
     // - verify width and height don't overflow int.
@@ -425,7 +430,7 @@ class DecodeImageV2Op : public OpKernel {
     }
   }
 
-  void DecodeGifV2(OpKernelContext* context, StringPiece input) {
+  void DecodeGifV2(OpKernelContext* context, absl::string_view input) {
     // GIF has 3 channels.
     OP_REQUIRES(context, channels_ == 0 || channels_ == 3,
                 errors::InvalidArgument("channels must be 0 or 3 for GIF, got ",
@@ -452,14 +457,15 @@ class DecodeImageV2Op : public OpKernel {
     // allocation til after dtype conversion is done. `gif`::Decode` supports
     // uint8 only.
     Tensor* output = nullptr;
-    int buffer_size = 0;
+    int64_t buffer_size = 0;
     string error_string;
     uint8* buffer = gif::Decode(
         input.data(), input.size(),
         [&](int num_frames, int width, int height, int channels) -> uint8* {
-          buffer_size = num_frames * height * width * channels;
+          buffer_size =
+              static_cast<int64_t>(num_frames) * height * width * channels;
 
-          Status status;
+          absl::Status status;
           // By the existing API, we support decoding GIF with `decode_jpeg` or
           // with `decode_png` if the GIF is a single-frame GIF (non-animated).
           // We need to make sure to return 3-D shapes when using in this case.
@@ -526,7 +532,7 @@ class DecodeImageV2Op : public OpKernel {
     }
   }
 
-  void DecodeBmpV2(OpKernelContext* context, StringPiece input) {
+  void DecodeBmpV2(OpKernelContext* context, absl::string_view input) {
     OP_REQUIRES(
         context, channels_ != 1,
         errors::InvalidArgument(

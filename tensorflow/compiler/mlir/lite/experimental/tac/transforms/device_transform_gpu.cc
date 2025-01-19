@@ -16,6 +16,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/experimental/tac/transforms/device_transform_gpu.h"
 
 #include <memory>
+#include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -63,7 +64,7 @@ void DeviceTransformGPUPass::runOnOperation() {
   auto func = getOperation();
   auto* ctx = &getContext();
   RewritePatternSet patterns = GetHardwareRewritePatternsGPU(ctx);
-  (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
+  (void)applyPatternsGreedily(func, std::move(patterns));
 }
 
 }  // namespace

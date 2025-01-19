@@ -54,14 +54,14 @@ NodeDef MakeParallelFilter(const string& name, MutableGraphView* graph) {
 
 }  // namespace
 
-Status FilterParallelization::OptimizeAndCollectStats(
+absl::Status FilterParallelization::OptimizeAndCollectStats(
     Cluster* cluster, const GrapplerItem& item, GraphDef* output,
     OptimizationStats* stats) {
   *output = item.graph;
   if (!autotune_) {
     VLOG(1) << "The optimization filter_parallelization is not applied if "
                "autotune is off.";
-    return Status::OK();
+    return absl::OkStatus();
   }
   MutableGraphView graph(output);
 
@@ -69,7 +69,7 @@ Status FilterParallelization::OptimizeAndCollectStats(
   // because we only want to enable extra filter parallelism on the main dataset
   // pipeline.
   if (graph_utils::IsItemDerivedFromFunctionDef(item, graph))
-    return Status::OK();
+    return absl::OkStatus();
 
   absl::flat_hash_set<string> nodes_to_delete;
   FunctionLibraryDefinition function_library(OpRegistry::Global(),
@@ -97,7 +97,7 @@ Status FilterParallelization::OptimizeAndCollectStats(
   }
 
   TF_RETURN_IF_ERROR(graph.DeleteNodes(nodes_to_delete));
-  return Status::OK();
+  return absl::OkStatus();
 }
 
 REGISTER_GRAPH_OPTIMIZER_AS(FilterParallelization, "filter_parallelization");

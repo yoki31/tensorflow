@@ -14,15 +14,20 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/lite/delegates/hexagon/hexagon_delegate_kernel.h"
 
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <memory>
+#include <string>
 #include <vector>
 
-#include "tensorflow/lite/builtin_ops.h"
-#include "tensorflow/lite/c/builtin_op_data.h"
-#include "tensorflow/lite/c/common.h"
+#include "hexagon/hexagon_nn.h"
 #include "tensorflow/lite/context_util.h"
+#include "tensorflow/lite/core/api/profiler.h"
+#include "tensorflow/lite/core/c/common.h"
+#include "tensorflow/lite/delegates/hexagon/builders/op_builder.h"
 #include "tensorflow/lite/delegates/hexagon/hexagon_implementation.h"
 #include "tensorflow/lite/delegates/hexagon/utils.h"
-#include "tensorflow/lite/kernels/kernel_util.h"
 
 namespace tflite {
 
@@ -241,8 +246,8 @@ TfLiteStatus HexagonDelegateKernel::Prepare(TfLiteContext* context,
 TfLiteStatus HexagonDelegateKernel::BuildGraph(
     TfLiteContext* context, const TfLiteIntArray* input_tensors,
     const TfLiteIntArray* output_tensors) {
-  builder_.reset(
-      new delegates::hexagon::GraphBuilder(hexagon_nn_, context, graph_id_));
+  builder_ = std::make_unique<delegates::hexagon::GraphBuilder>(
+      hexagon_nn_, context, graph_id_);
   if (params_.enable_dynamic_batch_size) {
     builder_->AddBatchSeqConfig(params_.max_batch_size,
                                 params_.input_batch_dimensions,

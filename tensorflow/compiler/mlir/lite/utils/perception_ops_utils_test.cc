@@ -14,19 +14,22 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/compiler/mlir/lite/utils/perception_ops_utils.h"
 
+#include <cstdint>
 #include <memory>
-#include <vector>
+#include <string>
 
-#include "llvm/ADT/SmallVector.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Builders.h"  // from @llvm-project
-#include "mlir/IR/BuiltinOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
+#include "mlir/IR/Location.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
+#include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_attributes.h"
-#include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/core/platform/test.h"
 
 namespace mlir {
@@ -106,10 +109,9 @@ class PerceptionUtilsTest : public ::testing::Test {
 
   void SetUp() override {
     context_ = std::make_unique<mlir::MLIRContext>();
-    context_
-        ->loadDialect<mlir::arith::ArithmeticDialect, mlir::func::FuncDialect,
-                      mlir::TF::TensorFlowDialect, TensorFlowLiteDialect>();
-    builder_ = std::unique_ptr<mlir::Builder>(new Builder(context_.get()));
+    context_->loadDialect<mlir::arith::ArithDialect, mlir::func::FuncDialect,
+                          mlir::TF::TensorFlowDialect, TensorFlowLiteDialect>();
+    builder_ = std::make_unique<mlir::Builder>(context_.get());
 
     fused_max_unpooling_func_ =
         createMaxUnpoolingFunc(builder_.get(), {2, 4, 4, 2}, {2, 2, 2, 2});

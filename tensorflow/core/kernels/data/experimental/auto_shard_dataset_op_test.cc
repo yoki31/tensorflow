@@ -13,7 +13,7 @@ limitations under the License.
 
 #include <string>
 
-#include "tensorflow/core/common_runtime/forward_type_inference.h"
+#include "tensorflow/core/common_runtime/type_inference.h"
 #include "tensorflow/core/data/dataset_test_base.h"
 #include "tensorflow/core/graph/node_builder.h"
 #include "tensorflow/core/kernels/data/shard_dataset_op.h"
@@ -40,7 +40,7 @@ class AutoShardDatasetParams : public DatasetParams {
         num_replicas_(num_replicas),
         index_(index),
         auto_shard_policy_(auto_shard_policy) {
-    input_dataset_params_.push_back(absl::make_unique<T>(input_dataset_params));
+    input_dataset_params_.push_back(std::make_unique<T>(input_dataset_params));
     iterator_prefix_ =
         name_utils::IteratorPrefix(input_dataset_params.dataset_type(),
                                    input_dataset_params.iterator_prefix());
@@ -50,15 +50,15 @@ class AutoShardDatasetParams : public DatasetParams {
     return CreateTensors<int64_t>(TensorShape({}), {{num_workers_}, {index_}});
   }
 
-  Status GetInputNames(std::vector<string>* input_names) const override {
+  absl::Status GetInputNames(std::vector<string>* input_names) const override {
     input_names->clear();
     input_names->emplace_back(AutoShardDatasetOp::kInputDataset);
     input_names->emplace_back(AutoShardDatasetOp::kNumWorkers);
     input_names->emplace_back(AutoShardDatasetOp::kIndex);
-    return Status::OK();
+    return absl::OkStatus();
   }
 
-  Status GetAttributes(AttributeVector* attr_vector) const override {
+  absl::Status GetAttributes(AttributeVector* attr_vector) const override {
     attr_vector->clear();
     attr_vector->emplace_back(AutoShardDatasetOp::kAutoShardPolicy,
                               auto_shard_policy_);
@@ -66,7 +66,7 @@ class AutoShardDatasetParams : public DatasetParams {
     attr_vector->emplace_back(AutoShardDatasetOp::kOutputTypes, output_dtypes_);
     attr_vector->emplace_back(AutoShardDatasetOp::kOutputShapes,
                               output_shapes_);
-    return Status::OK();
+    return absl::OkStatus();
   }
 
   string dataset_type() const override {
@@ -189,7 +189,7 @@ TEST_F(AutoShardDatasetOpTest, InvalidArguments) {
       AutoShardDatasetParams6(), AutoShardDatasetParams7()};
   for (const auto& dataset_params : invalid_dataset_params) {
     EXPECT_EQ(Initialize(dataset_params).code(),
-              tensorflow::error::INVALID_ARGUMENT);
+              absl::StatusCode::kInvalidArgument);
   }
 }
 
@@ -215,13 +215,13 @@ static void add_identity_nodes(Node* node, Graph& graph,
 }
 
 // Runs type inference pass on graph
-static Status type_inference(Graph& graph) {
+static absl::Status type_inference(Graph& graph) {
   GraphOptimizationPassOptions opt_options;
   std::unique_ptr<Graph> graph_ptr(new Graph(OpRegistry::Global()));
   graph_ptr->Copy(graph);
   opt_options.graph = &graph_ptr;
   opt_options.flib_def = graph.mutable_flib_def();
-  ForwardTypeInferencePass pass;
+  TypeInferencePass pass;
   return pass.Run(opt_options);
 }
 

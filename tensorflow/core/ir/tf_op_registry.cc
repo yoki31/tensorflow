@@ -15,8 +15,12 @@ limitations under the License.
 
 #include "tensorflow/core/ir/tf_op_registry.h"
 
+#include "mlir/IR/Dialect.h"  // from @llvm-project
+#include "mlir/IR/Operation.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_def_builder.h"
+#include "tensorflow/core/ir/interfaces.h"
 #include "tensorflow/core/ir/ops.h"
 
 namespace mlir {
@@ -26,23 +30,23 @@ TensorFlowOpRegistryInterface::TensorFlowOpRegistryInterface(Dialect *dialect)
 }
 
 // Returns true if the op is stateful.
-static bool IsStatefulImpl(tensorflow::OpRegistry *registry,
+static bool IsStatefulImpl(const tensorflow::OpRegistry *registry,
                            StringRef op_name) {
-  const tensorflow::OpRegistrationData *op_def =
+  const tensorflow::OpRegistrationData *op_reg_data =
       registry->LookUp(op_name.str());
   // If an op definition was not found, conservatively assume stateful.
-  if (!op_def) return true;
-  return op_def->op_def.is_stateful();
+  if (!op_reg_data) return true;
+  return op_reg_data->op_def.is_stateful();
 }
 
 bool TensorFlowOpRegistryInterface::isStateful(Operation *op) const {
   // Handle TFG internal ops.
-  if (isa<ReturnOp, YieldOp, ConditionOp>(op)) return false;
-  if (auto func = dyn_cast<GraphFuncOp>(op)) return func.is_stateful();
+  if (op->hasTrait<OpTrait::IntrinsicOperation>()) return false;
+  if (auto func = dyn_cast<GraphFuncOp>(op)) return func.getIsStateful();
   // Handle TFG region ops.
   // TODO(jeffniu): Region ops should be marked with a trait.
   StringRef op_name = op->getName().stripDialect();
-  if (op->getNumRegions() && op_name.endswith("Region"))
+  if (op->getNumRegions() && op_name.ends_with("Region"))
     op_name = op_name.drop_back(/*len("Region")=*/6);
   return IsStatefulImpl(registry_, op_name);
 }

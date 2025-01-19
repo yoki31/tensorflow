@@ -21,7 +21,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "unicode/appendable.h"  // from @icu
 #include "unicode/schriter.h"  // from @icu
 #include "unicode/uchar.h"  // from @icu
@@ -48,7 +48,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/bcast.h"
-#include "tensorflow/core/util/ptr_util.h"
 
 namespace tensorflow {
 namespace {
@@ -205,7 +204,7 @@ struct ErrorOptions {
   bool error_on_malformatting = false;
 };
 
-Status GetErrorOptions(OpKernelConstruction* ctx, ErrorOptions* out) {
+absl::Status GetErrorOptions(OpKernelConstruction* ctx, ErrorOptions* out) {
   *out = ErrorOptions();
 
   string error_policy;
@@ -238,7 +237,7 @@ Status GetErrorOptions(OpKernelConstruction* ctx, ErrorOptions* out) {
                                     &(out->replace_control_chars)));
   }
 
-  return Status::OK();
+  return absl::OkStatus();
 }
 
 inline bool ShouldHandleFormatError(const ErrorOptions& error_options,
@@ -263,7 +262,7 @@ class UnicodeTranscodeOp : public OpKernel {
     // at execution time (and to warm any data caches the converter needs).
     // This instance is not used.
     std::unique_ptr<WrappedConverter> input_encoder =
-        absl::make_unique<WrappedConverter>();
+        std::make_unique<WrappedConverter>();
     input_encoder->init(input_encoding_);
     OP_REQUIRES(ctx, input_encoder->converter_,
                 errors::InvalidArgument(
@@ -363,7 +362,7 @@ class UnicodeDecodeBaseOp : public OpKernel {
     // at execution time (and to warm any data caches the converter needs).
     // This instance is not used.
     std::unique_ptr<WrappedConverter> input_encoder =
-        absl::make_unique<WrappedConverter>();
+        std::make_unique<WrappedConverter>();
     input_encoder->init(input_encoding_);
     OP_REQUIRES(ctx, input_encoder->converter_,
                 errors::InvalidArgument(
@@ -409,7 +408,7 @@ class UnicodeDecodeBaseOp : public OpKernel {
     const auto& input_vec = input_tensor->flat<tstring>();
 
     std::unique_ptr<WrappedConverter> input_encoder =
-        absl::make_unique<WrappedConverter>();
+        std::make_unique<WrappedConverter>();
     input_encoder->init(input_encoding_);
     OP_REQUIRES(ctx, input_encoder->converter_,
                 errors::InvalidArgument(
@@ -533,6 +532,10 @@ class UnicodeEncodeOp : public OpKernel {
     const Tensor& input_splits = context->input(1);
     const auto input_splits_flat = input_splits.flat<SPLITS_TYPE>();
 
+    OP_REQUIRES(
+        context, input_tensor.dims() == 1 && input_splits.dims() == 1,
+        absl::InvalidArgumentError(
+            "Both the input_tensor and input_splits should be of rank 1. "));
     OP_REQUIRES(
         context, input_splits.NumElements() > 0,
         errors::InvalidArgument("Input_splits should contain elements, but "

@@ -13,17 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <cstdint>
 #include <string>
 
-#include "absl/strings/match.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
-#include "tensorflow/compiler/xla/client/lib/approx_topk.h"
-#include "tensorflow/compiler/xla/client/xla_builder.h"
-#include "tensorflow/compiler/xla/client/xla_computation.h"
-#include "tensorflow/compiler/xla/literal_util.h"
-#include "tensorflow/compiler/xla/shape.h"
-#include "tensorflow/compiler/xla/shape_util.h"
-#include "tensorflow/compiler/xla/xla_data.pb.h"
+#include "xla/hlo/builder/lib/approx_topk.h"
+#include "xla/hlo/builder/xla_builder.h"
+#include "xla/hlo/builder/xla_computation.h"
+#include "xla/literal_util.h"
+#include "xla/shape.h"
+#include "xla/shape_util.h"
+#include "xla/xla_data.pb.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op_requires.h"
 #include "tensorflow/core/framework/types.h"
@@ -64,7 +67,7 @@ class ApproxTopKOpBase : public XlaOpKernel {
   }
 
   void Compile(XlaOpKernelContext* ctx) override {
-    xla::Shape op_shape = ctx->InputXlaShape(0).ConsumeValueOrDie();
+    xla::Shape op_shape = ctx->InputXlaShape(0).value();
     xla::PrimitiveType op_type = op_shape.element_type();
 
     int64_t reduction_dim = reduction_dim_;
@@ -109,7 +112,8 @@ class ApproxTopKOpBase : public XlaOpKernel {
   int64_t reduction_input_size_override_;
   bool aggregate_to_topk_;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(ApproxTopKOpBase);
+  ApproxTopKOpBase(const ApproxTopKOpBase&) = delete;
+  void operator=(const ApproxTopKOpBase&) = delete;
 };
 
 class TpuApproxTopKOp : public ApproxTopKOpBase {
@@ -149,7 +153,8 @@ class FallbackApproxTopKOp : public ApproxTopKOpBase {
 
 // Register for TPU
 REGISTER_XLA_OP(Name("ApproxTopK")
-                    .Device({DEVICE_TPU, DEVICE_TPU_XLA_JIT})
+                    .Device(absl::Span<const absl::string_view>{
+                        DEVICE_TPU, DEVICE_TPU_XLA_JIT})
                     .TypeConstraint("T", {DT_FLOAT, DT_HALF, DT_BFLOAT16}),
                 TpuApproxTopKOp);
 

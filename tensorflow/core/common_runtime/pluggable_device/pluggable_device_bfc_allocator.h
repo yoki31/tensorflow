@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef TENSORFLOW_CORE_COMMON_RUNTIME_PLUGGABLE_DEVICE_PLUGGABLE_DEVICE_BFC_ALLOCATOR_H_
 #define TENSORFLOW_CORE_COMMON_RUNTIME_PLUGGABLE_DEVICE_PLUGGABLE_DEVICE_BFC_ALLOCATOR_H_
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,9 +41,10 @@ class PluggableDeviceBFCAllocator : public BFCAllocator {
                               size_t total_memory,
                               const GPUOptions& gpu_options, const string& name,
                               bool force_memory_growth_requested);
-  ~PluggableDeviceBFCAllocator() override {}
+  ~PluggableDeviceBFCAllocator() override = default;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(PluggableDeviceBFCAllocator);
+  PluggableDeviceBFCAllocator(const PluggableDeviceBFCAllocator&) = delete;
+  void operator=(const PluggableDeviceBFCAllocator&) = delete;
 
  private:
   static bool GetAllowGrowthValue(const GPUOptions& gpu_options,

@@ -19,16 +19,18 @@ from concurrent import futures
 import numpy as np
 import tensorflow  # pylint: disable=unused-import
 
+from tensorflow.compiler.mlir.quantization.tensorflow import quantization_options_pb2 as quant_opts_pb2
 from tensorflow.compiler.mlir.quantization.tensorflow.python import quantize_model
 from tensorflow.python.eager import def_function
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_spec
+from tensorflow.python.framework import test_util
 from tensorflow.python.ops import math_ops
 from tensorflow.python.platform import test
 from tensorflow.python.saved_model import save as saved_model_save
 from tensorflow.python.saved_model import tag_constants
-from tensorflow.python.training.tracking import tracking
+from tensorflow.python.trackable import autotrackable
 
 
 class MultiThreadedTest(test.TestCase):
@@ -39,14 +41,19 @@ class MultiThreadedTest(test.TestCase):
     self.pool = futures.ThreadPoolExecutor(max_workers=4)
 
   def _convert_with_calibration(self):
-
-    class ModelWithAdd(tracking.AutoTrackable):
+    class ModelWithAdd(autotrackable.AutoTrackable):
       """Basic model with addition."""
 
-      @def_function.function(input_signature=[
-          tensor_spec.TensorSpec(shape=[10], dtype=dtypes.float32, name='x'),
-          tensor_spec.TensorSpec(shape=[10], dtype=dtypes.float32, name='y')
-      ])
+      @def_function.function(
+          input_signature=[
+              tensor_spec.TensorSpec(
+                  shape=[10], dtype=dtypes.float32, name='x'
+              ),
+              tensor_spec.TensorSpec(
+                  shape=[10], dtype=dtypes.float32, name='y'
+              ),
+          ]
+      )
       def add(self, x, y):
         res = math_ops.add(x, y)
         return {'output': res}
@@ -54,28 +61,38 @@ class MultiThreadedTest(test.TestCase):
     def data_gen():
       for _ in range(255):
         yield {
-            'x':
-                ops.convert_to_tensor(
-                    np.random.uniform(size=(10)).astype('f4')),
-            'y':
-                ops.convert_to_tensor(
-                    np.random.uniform(size=(10)).astype('f4'))
+            'x': ops.convert_to_tensor(
+                np.random.uniform(size=(10)).astype('f4')
+            ),
+            'y': ops.convert_to_tensor(
+                np.random.uniform(size=(10)).astype('f4')
+            ),
         }
 
     root = ModelWithAdd()
 
     temp_path = self.create_tempdir().full_path
     saved_model_save.save(
-        root, temp_path, signatures=root.add.get_concrete_function())
+        root, temp_path, signatures=root.add.get_concrete_function()
+    )
+
+    quantization_options = quant_opts_pb2.QuantizationOptions(
+        quantization_method=quant_opts_pb2.QuantizationMethod(
+            preset_method=quant_opts_pb2.QuantizationMethod.PresetMethod.METHOD_STATIC_RANGE_INT8
+        ),
+        tags={tag_constants.SERVING},
+        signature_keys=['serving_default'],
+    )
 
     model = quantize_model.quantize(
-        temp_path, ['serving_default'], [tag_constants.SERVING],
-        optimization_method=quantize_model.OptimizationMethod
-        .STATIC_RANGE_QUANT,
-        representative_dataset=data_gen)
+        temp_path,
+        quantization_options=quantization_options,
+        representative_dataset=data_gen(),
+    )
     return model
 
-  def testMultipleConversionJobsWithCalibration(self):
+  @test_util.run_in_graph_and_eager_modes
+  def test_multiple_conversion_jobs_with_calibration(self):
     # Ensure that multiple conversion jobs with calibration won't encounter any
     # concurrency issue.
     with self.pool:
